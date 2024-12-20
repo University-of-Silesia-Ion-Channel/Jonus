@@ -1,6 +1,7 @@
-from monostable_model import monostable_model
+from monostable_model import ion_channel_model, model_force_square, random_force_gauss
+from ipywidgets import interact
 
 
 if __name__ == '__main__':
-    monostable_model(a=1, D=0.5, delta_t=0.01, records=25000)
+    interact(ion_channel_model(model_force=model_force_square, random_force=random_force_gauss), D=(0, 1, 0.01))
 exit()
