@@ -86,7 +86,7 @@ def ion_channel_model(a=1, closed=(-1, 5000), opened=(1, 2500), D=0.5, delta_t=0
         )
         times = np.append(times, t * delta_t)
 
-        data.append([t, x[t], b[0]])
+        data.append([times[t], x[t], b[0]])
 
         t += 1
         tau -= 1
