@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from random import gauss, choice
 from scipy.stats import levy_stable
+from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 
 
 def random_force_gauss(D, h, records, args):
@@ -71,11 +72,11 @@ def ion_channel_model(a=1, closed=(-1, 5000), opened=(1, 2500), D=0.5, delta_t=0
     random_force_values = random_force(D, delta_t, records, force_params)
     x = np.array([model_force(0, a, b[0]) * delta_t + random_force_values[0]], dtype=np.float32)
     times = np.array([t], dtype=np.float32)
+    data.append([times[0], x[0], b[0]])
     # generating time of next state change (opened/closed)
     tau = np.random.exponential(b[1])
     t += 1
-    data.append([t, x[0], b[0]])
-    print(x[0], b[0])
+    print(times[0], x[0], b[0])
     while t < records:
         x = np.append(
         x, (
@@ -99,5 +100,16 @@ def ion_channel_model(a=1, closed=(-1, 5000), opened=(1, 2500), D=0.5, delta_t=0
 
     data = np.array(data)
     # Temporary naming scheme
-    np.savetxt(f'data_{model_force.__name__}_{random_force.__name__}_{D}_{delta_t}_{list(force_params.values()) if isinstance(force_params, dict) else '_'}.csv', data, delimiter=',')
+    np.savetxt(f'data_{model_force.__name__}_{random_force.__name__}_{D}_{delta_t}_{list(force_params.values()) if isinstance(force_params, dict) else '_'}.csv', data, delimiter=',', header='time,position,state', fmt=['%.2f', '%e', '%d'])
     return data
+
+def calculate_autocorelation(data, lags=40):
+    """Function calculates and plots autocorrelation function.
+
+    Args:
+        data (np.array): Array with data.
+        lags (int, optional): Number of lags to calculate. Defaults to 40.
+    """
+
+    plot_acf(data, lags=lags)
+    plt.show()
