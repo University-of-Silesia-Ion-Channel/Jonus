@@ -1,3 +1,4 @@
+from matplotlib import axes
 import numpy as np
 import matplotlib.pyplot as plt
 from random import gauss, choice
@@ -119,9 +120,9 @@ def calculate_autocorelation_acf(data, lags=30, title=""):
     """
     fig, axs = plt.subplots(1, 2, figsize=(12, 6))
     fig.suptitle('Autocorrelation ' + title)
-    plot_acf((data), lags=lags, ax=axs[0], fft=True, title='Unmodified autocorrelation ' + title)
+    plot_acf((data), lags=lags, ax=axs[0], fft=True, title='Unmodified autocorrelation')
     # plt.show()
-    plot_acf(np.diff(data), lags=lags, ax=axs[1], fft=True, title='Modified autocorrelation ' + title)
+    plot_acf(np.diff(data), lags=lags, ax=axs[1], fft=True, title='Modified autocorrelation')
     fig.savefig(f'outputs/acf_{title}.png')
     plt.show()
 
@@ -138,28 +139,28 @@ def calculate_autocorelation_dfa(data, title=""):
 
     H, H_intercept = pydfa.fitFlucVec()
 
-    plt.plot(np.log(n), np.log(F), 'ro')
-    plt.plot(np.log(n), H_intercept+H*np.log(n), 'k-', label='H = {:.2f}'.format(H))
-    plt.xlabel('ln(n)', fontsize=14)
-    plt.ylabel('ln(F(n))', fontsize=14)
-    plt.title('DFA', fontsize=14)
-    plt.legend(loc=0, fontsize=14)
-    plt.savefig(f'outputs/dfa_{title}.png')
-    plt.show()
+    fig, axes = plt.subplots(1, 2, figsize=(12, 6))
+    fig.suptitle('DFA ' + title)
+    axes[0].plot(np.log(n), np.log(F), 'ro')
+    axes[0].plot(np.log(n), H_intercept+H*np.log(n), 'k-', label='H = {:.2f}'.format(H))
+    axes[0].set_xlabel('ln(n)', fontsize=14)
+    axes[0].set_ylabel('ln(F(n))', fontsize=14)
+    axes[0].set_title('DFA', fontsize=14)
+    axes[0].legend(loc=0, fontsize=14)
 
     limits_list = np.array([[15,2000], [200,1000]], dtype=int)
     list_H, list_H_intercept = pydfa.multiFitFlucVec(limits_list)
 
     clrs = ['k', 'b', 'm', 'c', 'y']
     stls = ['-', '--', '.-']
-    plt.plot(np.log(n), np.log(F), 'ro')
+    axes[1].plot(np.log(n), np.log(F), 'ro')
     for i in range(len(list_H)):
         n_rng = np.arange(limits_list[i][0], limits_list[i][1]+1)
-        plt.plot(np.log(n_rng), list_H_intercept[i]+list_H[i]*np.log(n_rng),
+        axes[1].plot(np.log(n_rng), list_H_intercept[i]+list_H[i]*np.log(n_rng),
                 clrs[i%len(clrs)]+stls[(i//len(clrs))%len(stls)], label='H = {:.2f}'.format(list_H[i]))
-    plt.xlabel('ln(n)', fontsize=14)
-    plt.ylabel('ln(F(n))', fontsize=14)
-    plt.title('DFA ' + title, fontsize=14)
-    plt.legend(loc=0, fontsize=14)
-    plt.savefig(f'outputs/dfa_multi_{title}.png')
+    axes[1].set_xlabel('ln(n)', fontsize=14)
+    axes[1].set_ylabel('ln(F(n))', fontsize=14)
+    axes[1].set_title('DFA', fontsize=14)
+    axes[1].legend(loc=0, fontsize=14)
+    plt.savefig(f'outputs/dfa_{title}.png')
     plt.show()
