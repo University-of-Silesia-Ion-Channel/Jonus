@@ -2,7 +2,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from random import gauss, choice
 from scipy.stats import levy_stable
-from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
+from statsmodels.graphics.tsaplots import plot_acf
+import fathon
+from fathon import fathonUtils as fu
 
 
 def random_force_gauss(D, h, records, args, opened_state):
@@ -64,10 +66,11 @@ def ion_channel_model(a=1, closed=(-1, 6.0), opened=(1, 2.0), D=0.5, delta_t=0.0
         **force_params: Additional parameters for random force function.
 
     Returns:
-        np.array: Array with data.
+        tuple: Tuple with data and breakpoints.
     """
     generator = np.random.Generator(np.random.PCG64(seed=12345))
     data = []
+    breakpoints = []
     t = 0
     # generating first state of ion channel (opened/closed)
     b = choice([closed, opened])
@@ -92,6 +95,7 @@ def ion_channel_model(a=1, closed=(-1, 6.0), opened=(1, 2.0), D=0.5, delta_t=0.0
         t += 1
         tau -= delta_t
         if(tau <= delta_t):
+            breakpoints.append(times[t-1])
             if(b[0] == closed[0]):
                 b=opened
             else:
@@ -104,15 +108,58 @@ def ion_channel_model(a=1, closed=(-1, 6.0), opened=(1, 2.0), D=0.5, delta_t=0.0
     data = np.array(data)
     # Temporary naming scheme
     np.savetxt(f'outputs/data_{model_force.__name__}_{random_force.__name__}_{D}_{delta_t}_{list(force_params.values()) if isinstance(force_params, dict) else '_'}.csv', data, delimiter=',', header='time,position,state', fmt=['%.2f', '%e', '%d'])
-    return data
+    return data, breakpoints
 
-def calculate_autocorelation(data, lags=40):
+def calculate_autocorelation_acf(data, lags=30, title=""):
     """Function calculates and plots autocorrelation function.
 
     Args:
         data (np.array): Array with data.
-        lags (int, optional): Number of lags to calculate. Defaults to 40.
+        lags (int, optional): Number of lags to calculate. Defaults to 30.
     """
-    
-    plot_acf(np.diff(data), lags=lags, fft=True)
+    fig, axs = plt.subplots(1, 2, figsize=(12, 6))
+    fig.suptitle('Autocorrelation ' + title)
+    plot_acf((data), lags=lags, ax=axs[0], fft=True, title='Unmodified autocorrelation ' + title)
+    # plt.show()
+    plot_acf(np.diff(data), lags=lags, ax=axs[1], fft=True, title='Modified autocorrelation ' + title)
+    fig.savefig(f'outputs/acf_{title}.png')
+    plt.show()
+
+def calculate_autocorelation_dfa(data, title=""):
+    a = fu.toAggregated(data)
+
+    pydfa = fathon.DFA(a)
+
+    winSizes = fu.linRangeByStep(10, 2000)
+    revSeg = True
+    polOrd = 3
+
+    n, F = pydfa.computeFlucVec(winSizes, revSeg=revSeg, polOrd=polOrd)
+
+    H, H_intercept = pydfa.fitFlucVec()
+
+    plt.plot(np.log(n), np.log(F), 'ro')
+    plt.plot(np.log(n), H_intercept+H*np.log(n), 'k-', label='H = {:.2f}'.format(H))
+    plt.xlabel('ln(n)', fontsize=14)
+    plt.ylabel('ln(F(n))', fontsize=14)
+    plt.title('DFA', fontsize=14)
+    plt.legend(loc=0, fontsize=14)
+    plt.savefig(f'outputs/dfa_{title}.png')
+    plt.show()
+
+    limits_list = np.array([[15,2000], [200,1000]], dtype=int)
+    list_H, list_H_intercept = pydfa.multiFitFlucVec(limits_list)
+
+    clrs = ['k', 'b', 'm', 'c', 'y']
+    stls = ['-', '--', '.-']
+    plt.plot(np.log(n), np.log(F), 'ro')
+    for i in range(len(list_H)):
+        n_rng = np.arange(limits_list[i][0], limits_list[i][1]+1)
+        plt.plot(np.log(n_rng), list_H_intercept[i]+list_H[i]*np.log(n_rng),
+                clrs[i%len(clrs)]+stls[(i//len(clrs))%len(stls)], label='H = {:.2f}'.format(list_H[i]))
+    plt.xlabel('ln(n)', fontsize=14)
+    plt.ylabel('ln(F(n))', fontsize=14)
+    plt.title('DFA ' + title, fontsize=14)
+    plt.legend(loc=0, fontsize=14)
+    plt.savefig(f'outputs/dfa_multi_{title}.png')
     plt.show()
