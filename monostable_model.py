@@ -1,14 +1,15 @@
+import random
 from matplotlib import axes
 import numpy as np
 import matplotlib.pyplot as plt
-from random import gauss, choice
+from random import choice, seed
 from scipy.stats import levy_stable
 from statsmodels.graphics.tsaplots import plot_acf
 import fathon
 from fathon import fathonUtils as fu
+import os
 
-
-def random_force_gauss(D, h, records, args, opened_state):
+def random_force_gauss(D, h, records, args, opened_state, generator):
     """Function generates random force values using gaussian distribution.
 
     Args:
@@ -21,7 +22,8 @@ def random_force_gauss(D, h, records, args, opened_state):
     Returns:
         np.array: Array with random force values.
     """
-    return np.array([(h * D) ** 0.5 * gauss(0, 1) for _ in range(records)])  # losowa siła
+    
+    return (h * D) ** 0.5 * generator.normal(0, 1, size=records)  # losowa siła
 
 def model_force_square(x, a, b):
     """Function calculates force value using square function.
@@ -37,7 +39,7 @@ def model_force_square(x, a, b):
     return -a*(x - b)
 
 # takes two common parameters and dictionary with 5 parameters needed for levy_stable.rvs function
-def random_force_levy(D, h, records, args, opened_state):
+def random_force_levy(D, h, records, args, opened_state, generator):
     """Function generates random force values using levy_stable distribution.
 
     Args:
@@ -50,10 +52,10 @@ def random_force_levy(D, h, records, args, opened_state):
     Returns:
         np.array: Array with random force values.
     """
-    r = levy_stable.rvs(alpha=args['alpha'], beta=args['beta_opened' if opened_state else 'beta_closed'], loc=args['location'], scale=args['scale'], size=records)
+    r = levy_stable.rvs(alpha=args['alpha'], beta=args['beta_opened' if opened_state else 'beta_closed'], loc=args['location'], scale=args['scale'], size=records, random_state=generator)
     return (h * D) ** 0.5 * r  # random force
 
-def ion_channel_model(a=1, closed=(-1, 6.0), opened=(1, 2.0), D=0.5, delta_t=0.01, records=50000, model_force=model_force_square, random_force=random_force_gauss, **force_params):
+def ion_channel_model(a=1, closed=(-1, 6.0), opened=(1, 2.0), D=0.5, delta_t=0.01, records=50000, model_force=model_force_square, random_force=random_force_gauss, takes_prev_vals=True, **force_params):
     """Function, that generates time series of ion channel model and saves it to csv file.
     Args:
         a (int, optional): One of the coefficients of force. Defaults to 1.
@@ -76,15 +78,16 @@ def ion_channel_model(a=1, closed=(-1, 6.0), opened=(1, 2.0), D=0.5, delta_t=0.0
     # generating first state of ion channel (opened/closed)
     b = choice([closed, opened])
     tau = generator.exponential(b[1])
-    random_force_values = random_force(D, delta_t, np.int32(tau//delta_t), force_params, b == opened)
+    random_force_values = random_force(D, delta_t, np.int32(tau//delta_t), force_params, b == opened, generator=generator)
     x = np.array([model_force(0, a, b[0]) * delta_t + random_force_values[0]], dtype=np.float32)
     times = np.array([t], dtype=np.float32)
     data.append([times[0], x[0], b[0]])
     t += 1
+    no_state_change = True # needed so it doesn't take previous value of previous state (closed and opened are seperated)
     while t < records:
         x = np.append(
         x, (
-            x[t - 1] +
+            no_state_change * takes_prev_vals * x[t - 1] +
             model_force(x[t - 1], a, b[0]) * delta_t +
             random_force_values[t - 1]
             )
@@ -92,7 +95,7 @@ def ion_channel_model(a=1, closed=(-1, 6.0), opened=(1, 2.0), D=0.5, delta_t=0.0
         times = np.append(times, t * delta_t)
 
         data.append([times[t], x[t], b[0]])
-
+        no_state_change = True
         t += 1
         tau -= delta_t
         if(tau <= delta_t):
@@ -103,8 +106,8 @@ def ion_channel_model(a=1, closed=(-1, 6.0), opened=(1, 2.0), D=0.5, delta_t=0.0
                 b=closed
             tau = generator.exponential(b[1])
             tau = 1.0 if tau < 1.0 else tau
-            random_force_values = np.append(random_force_values, random_force(D, delta_t, np.int32(tau//delta_t), force_params, b[0] == opened[0]))
-            
+            random_force_values = np.append(random_force_values, random_force(D, delta_t, np.int32(tau//delta_t), force_params, b[0] == opened[0], generator=generator))
+            no_state_change = False
 
     data = np.array(data)
     # Temporary naming scheme
@@ -123,7 +126,8 @@ def calculate_autocorelation_acf(data, lags=30, title=""):
     plot_acf((data), lags=lags, ax=axs[0], fft=True, title='Unmodified autocorrelation')
     # plt.show()
     plot_acf(np.diff(data), lags=lags, ax=axs[1], fft=True, title='Modified autocorrelation')
-    fig.savefig(f'outputs/acf_{title}.png')
+    os.mkdir(f"outputs/{title}")
+    fig.savefig(f'outputs/{title}/acf.png')
     plt.show()
 
 def calculate_autocorelation_dfa(data, title=""):
@@ -162,5 +166,5 @@ def calculate_autocorelation_dfa(data, title=""):
     axes[1].set_ylabel('ln(F(n))', fontsize=14)
     axes[1].set_title('DFA', fontsize=14)
     axes[1].legend(loc=0, fontsize=14)
-    plt.savefig(f'outputs/dfa_{title}.png')
+    plt.savefig(f'outputs/{title}/dfa.png')
     plt.show()
