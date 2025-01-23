@@ -13,11 +13,12 @@ def random_force_gauss(D, h, records, args, opened_state, generator):
     """Function generates random force values using gaussian distribution.
 
     Args:
-        D (float): Needs to be similar to h in terms of order of magnitude.
+        D (float): Needs to be similar to h in terms of order of magnitude. Is linked with temperature.
         h (float): Needs to be similar to D in terms of order of magnitude.
         records (int): Number of records to generate.
         args (dict): Placeholder for additional arguments.
         opened_state (bool): State of ion channel.
+        generator (numpy.Generator): used for seeded generation
 
     Returns:
         np.array: Array with random force values.
@@ -43,11 +44,12 @@ def random_force_levy(D, h, records, args, opened_state, generator):
     """Function generates random force values using levy_stable distribution.
 
     Args:
-        D (float): Needs to be similar to h in terms of order of magnitude.
+        D (float): Needs to be similar to h in terms of order of magnitude. It's linked with temperature.
         h (float): Needs to be similar to D in terms of order of magnitude.
         records (int): Number of records to generate.
         args (dict): Placeholder for additional arguments. Contains: alpha, beta_closed, beta_opened, location, scale.
         opened_state (bool): State of ion channel.
+        generator (numpy.Generator): used for seeded generation
 
     Returns:
         np.array: Array with random force values.
@@ -55,23 +57,25 @@ def random_force_levy(D, h, records, args, opened_state, generator):
     r = levy_stable.rvs(alpha=args['alpha'], beta=args['beta_opened' if opened_state else 'beta_closed'], loc=args['location'], scale=args['scale'], size=records, random_state=generator)
     return (h * D) ** 0.5 * r  # random force
 
-def ion_channel_model(a=1, closed=(-1, 6.0), opened=(1, 2.0), D=0.5, delta_t=0.01, records=50000, model_force=model_force_square, random_force=random_force_gauss, takes_prev_vals=True, **force_params):
+def ion_channel_model(a=1, closed=(-1, 6.0), opened=(1, 2.0), D=0.5, delta_t=0.01, records=50000, model_force=model_force_square, random_force=random_force_gauss, takes_prev_vals=True, seed=12345, **force_params):
     """Function, that generates time series of ion channel model and saves it to csv file.
     Args:
-        a (int, optional): One of the coefficients of force. Defaults to 1.
-        closed (tuple, optional): Tuple where first item is state of closed ion channel and second is value to be passed to np.random.exponential to generate time the channel is closed. Defaults to (-1, 5000).
-        opened (tuple, optional): Tuple where first item is state of closed ion channel and second is value to be passed to np.random.exponential to generate time the channel is opened. Defaults to (1, 2500).
-        D (float, optional): Needs to be similar to delta_t in terms of order of magnitude. Defaults to 0.5.
-        delta_t (float, optional): Needs to be similar to D in terms of order of magnitude. Defaults to 0.01.
-        records (int, optional): Number of records to generate.. Defaults to 50000.
-        model_force (func, optional): Parameter to pass model force. Defaults to model_force_square.
-        random_force (func, optional): Parameter to pass random force that generates noise. Defaults to random_force_gauss.
+        a (_int_, optional): One of the coefficients of force. Defaults to 1.
+        closed (_tuple_, optional): Tuple where first item is state of closed ion channel and second is value to be passed to np.random.exponential to generate time the channel is closed. Defaults to (-1, 5000).
+        opened (_tuple_, optional): Tuple where first item is state of closed ion channel and second is value to be passed to np.random.exponential to generate time the channel is opened. Defaults to (1, 2500).
+        D (_float_, optional): Needs to be similar to delta_t in terms of order of magnitude. Defaults to 0.5.
+        delta_t (_float_, optional): Needs to be similar to D in terms of order of magnitude. Defaults to 0.01.
+        records (_int_, optional): Number of records to generate.. Defaults to 50000.
+        model_force (_func_, optional): Parameter to pass model force. Defaults to model_force_square.
+        random_force (_func_, optional): Parameter to pass random force that generates noise. Defaults to random_force_gauss.
+        takes_prev_vals (_bool_, optional): idk
+        seed (_int_, optional): Seed for np.random.Generator for seeded model generation.
         **force_params: Additional parameters for random force function.
 
     Returns:
         tuple: Tuple with data and breakpoints.
     """
-    generator = np.random.Generator(np.random.PCG64(seed=12345))
+    generator = np.random.Generator(np.random.PCG64(seed=seed))
     data = []
     breakpoints = []
     t = 0
@@ -79,11 +83,12 @@ def ion_channel_model(a=1, closed=(-1, 6.0), opened=(1, 2.0), D=0.5, delta_t=0.0
     b = choice([closed, opened])
     tau = generator.exponential(b[1])
     random_force_values = random_force(D, delta_t, np.int32(tau//delta_t), force_params, b == opened, generator=generator)
+    
     x = np.array([model_force(0, a, b[0]) * delta_t + random_force_values[0]], dtype=np.float32)
     times = np.array([t], dtype=np.float32)
     data.append([times[0], x[0], b[0]])
     t += 1
-    no_state_change = True # needed so it doesn't take previous value of previous state (closed and opened are seperated)
+    no_state_change = True # needed so it doesn't take previous value of previous state (closed and opened are seperated and changes are more acute)
     while t < records:
         x = np.append(
         x, (
@@ -114,23 +119,37 @@ def ion_channel_model(a=1, closed=(-1, 6.0), opened=(1, 2.0), D=0.5, delta_t=0.0
     np.savetxt(f'outputs/data_{model_force.__name__}_{random_force.__name__}_{D}_{delta_t}_{list(force_params.values()) if isinstance(force_params, dict) else '_'}.csv', data, delimiter=',', header='time,position,state', fmt=['%.2f', '%e', '%d'])
     return data, breakpoints
 
-def calculate_autocorelation_acf(data, lags=30, title=""):
+def calculate_autocorrelation_acf(data, lags=30, title="test"):
     """Function calculates and plots autocorrelation function.
 
     Args:
         data (np.array): Array with data.
         lags (int, optional): Number of lags to calculate. Defaults to 30.
+        title (string, optional): Directory to save plot to. Defaults to "test"
     """
     fig, axs = plt.subplots(1, 2, figsize=(12, 6))
     fig.suptitle('Autocorrelation ' + title)
     plot_acf((data), lags=lags, ax=axs[0], fft=True, title='Unmodified autocorrelation')
     # plt.show()
     plot_acf(np.diff(data), lags=lags, ax=axs[1], fft=True, title='Modified autocorrelation')
-    os.mkdir(f"outputs/{title}")
+    if(not os.path.isdir(f"outputs/{title}")):
+        os.mkdir(f"outputs/{title}")
     fig.savefig(f'outputs/{title}/acf.png')
     plt.show()
 
-def calculate_autocorelation_dfa(data, title=""):
+def calculate_autocorrelation_dfa(data, title="test"):
+    """ Calculates, shows and saves Detrended Fluctuation Analysis plots with Hurst exponent for autocorrelation. 
+    Depending on the value of H it is:
+        * H < 0.5 - anti-correlated
+        * H around 0.5 - uncorrelated, white noise
+        * H > 0.5 - correlated
+        * H around - 1/f-noise, pink noise
+        * H > 1 - non-stationary, unbounded
+        * H around 1.5 - Brownian noise
+    Args:
+        data (_np.array_): Array with data to calculate autocorelation on.
+        title (_str_, optional): Title of figure and directory name to save plots to. Defaults to "test".
+    """
     a = fu.toAggregated(data)
 
     pydfa = fathon.DFA(a)
@@ -166,5 +185,7 @@ def calculate_autocorelation_dfa(data, title=""):
     axes[1].set_ylabel('ln(F(n))', fontsize=14)
     axes[1].set_title('DFA', fontsize=14)
     axes[1].legend(loc=0, fontsize=14)
+    if(not os.path.isdir(f"outputs/{title}")):
+        os.mkdir(f"outputs/{title}")
     plt.savefig(f'outputs/{title}/dfa.png')
     plt.show()
