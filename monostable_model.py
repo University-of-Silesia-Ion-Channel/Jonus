@@ -1,8 +1,6 @@
-import random
-from matplotlib import axes
 import numpy as np
 import matplotlib.pyplot as plt
-from random import choice, seed
+from random import choice
 from scipy.stats import levy_stable
 from statsmodels.graphics.tsaplots import plot_acf
 import fathon
@@ -154,37 +152,20 @@ def calculate_autocorrelation_dfa(data, title="test"):
 
     pydfa = fathon.DFA(a)
 
-    winSizes = fu.linRangeByStep(10, 2000)
+    winSizes = fu.linRangeByStep(10, len(a))
     revSeg = True
-    polOrd = 3
+    polOrd = 2
 
     n, F = pydfa.computeFlucVec(winSizes, revSeg=revSeg, polOrd=polOrd)
 
     H, H_intercept = pydfa.fitFlucVec()
+    plt.title('DFA ' + title)
+    plt.plot(np.log(n), np.log(F), 'ro')
+    plt.plot(np.log(n), H_intercept+H*np.log(n), 'k-', label='H = {:.2f}'.format(H))
+    plt.xlabel('ln(n)', fontsize=14)
+    plt.ylabel('ln(F(n))', fontsize=14)
+    plt.legend(loc=0, fontsize=14)
 
-    fig, axes = plt.subplots(1, 2, figsize=(12, 6))
-    fig.suptitle('DFA ' + title)
-    axes[0].plot(np.log(n), np.log(F), 'ro')
-    axes[0].plot(np.log(n), H_intercept+H*np.log(n), 'k-', label='H = {:.2f}'.format(H))
-    axes[0].set_xlabel('ln(n)', fontsize=14)
-    axes[0].set_ylabel('ln(F(n))', fontsize=14)
-    axes[0].set_title('DFA', fontsize=14)
-    axes[0].legend(loc=0, fontsize=14)
-
-    limits_list = np.array([[15,2000], [200,1000]], dtype=int)
-    list_H, list_H_intercept = pydfa.multiFitFlucVec(limits_list)
-
-    clrs = ['k', 'b', 'm', 'c', 'y']
-    stls = ['-', '--', '.-']
-    axes[1].plot(np.log(n), np.log(F), 'ro')
-    for i in range(len(list_H)):
-        n_rng = np.arange(limits_list[i][0], limits_list[i][1]+1)
-        axes[1].plot(np.log(n_rng), list_H_intercept[i]+list_H[i]*np.log(n_rng),
-                clrs[i%len(clrs)]+stls[(i//len(clrs))%len(stls)], label='H = {:.2f}'.format(list_H[i]))
-    axes[1].set_xlabel('ln(n)', fontsize=14)
-    axes[1].set_ylabel('ln(F(n))', fontsize=14)
-    axes[1].set_title('DFA', fontsize=14)
-    axes[1].legend(loc=0, fontsize=14)
     if(not os.path.isdir(f"outputs/{title}")):
         os.mkdir(f"outputs/{title}")
     plt.savefig(f'outputs/{title}/dfa.png')
