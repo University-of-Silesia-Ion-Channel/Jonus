@@ -1,5 +1,4 @@
 import matplotlib.pyplot as plt
-from random import choice
 from scipy.stats import levy_stable
 from statsmodels.graphics.tsaplots import plot_acf
 import fathon
@@ -60,15 +59,17 @@ class IonChannel:
         ``closed[1]`` > ``opened[1]``
         """
         self.__a = a
-        self.__closed = closed
-        self.__opened = opened
+        self.__closed = list(closed)
+        self.__opened = list(opened)
+        self.__closed[1] = self.__closed[1]*delta_t*100
+        self.__opened[1] = self.__opened[1]*delta_t*100
         self.__D = D
         self.__delta_t = delta_t
         self.__records = records
         self.__takes_prev_vals = takes_prev_vals
         self.__random_force_params = random_force_params
         self.__generator = np.random.Generator(np.random.PCG64(seed=seed))
-        self.__threshold = 0.5 
+        self.__threshold = 1.0 
         self.data = []
         self.breakpoints = []
 
@@ -88,7 +89,7 @@ class IonChannel:
             Array with random force values.
         """
         
-        return (self.__delta_t * self.__D) ** 0.5 * self.__generator.normal(0, 1, size=records)  # losowa siła
+        return (2 * self.__delta_t * self.__D) ** 0.5 * self.__generator.normal(0, 1, size=records)  # losowa siła
     
     def __model_force_square(self, x, b):
         """Function calculates force value using square function.
@@ -106,7 +107,7 @@ class IonChannel:
             Force value at x.
         """
         return -self.__a*(x - b)
-    
+       
     # takes two common parameters and dictionary with 5 parameters needed for levy_stable.rvs function
     def __random_force_levy(self, records, opened_state):
         """Function generates random force values using ``levy_stable`` distribution.
@@ -143,59 +144,64 @@ class IonChannel:
             self.__random_force = self.__random_force_levy
 
         t = 0
+        dwell_times = []
         # generating first state of ion channel (opened/closed)
-        b = choice([self.__closed, self.__opened])
+        b = self.__generator.choice([self.__closed, self.__opened])
         tau = self.__generator.exponential(b[1])
-        random_force_values = self.__random_force(np.int32(tau//self.__delta_t), b == self.__opened)
+        dwell_times.append(tau)
+        # print(f"Dwell time {t}:{tau}")
+        random_force_values = self.__random_force(np.int32(tau//self.__delta_t), b[0] == self.__opened[0])
         
-        x = np.array([self.__model_force_square(0, b[0]) * self.__delta_t + random_force_values[0]], dtype=np.float32)
+        x = np.array([b[0]], dtype=np.float32)
         times = np.array([t], dtype=np.float32)
         self.data.append([times[0], x[0], b[0]])
         t += 1
-        no_state_change = True # needed so it doesn't take previous value of previous state (closed and opened are seperated and changes are more acute)
+        # no_state_change = True # needed so it doesn't take previous value of previous state (closed and opened are seperated and changes are more acute)
         while t < self.__records:
             count = 0
             new_x = (
-                no_state_change * self.__takes_prev_vals * x[t - 1] +
+                # no_state_change *
+                self.__takes_prev_vals * x[t - 1] +
                 self.__model_force_square(x[t - 1], b[0]) * self.__delta_t +
                 random_force_values[t - 1]
                 )
             while np.abs(np.abs(new_x) - self.__threshold) > np.abs(b[0]) and count < 100:
                 # generate a new smaller x
-                random_force_values[t - 1] = self.__random_force(1, b == self.__opened)[0]
+                random_force_values[t - 1] = self.__random_force(1, b[0] == self.__opened[0])[0]
                 new_x = (
-                    no_state_change * self.__takes_prev_vals * x[t - 1] +
+                    # no_state_change *
+                    self.__takes_prev_vals * x[t - 1] +
                     self.__model_force_square(x[t - 1], b[0]) * self.__delta_t +
                     random_force_values[t - 1]
                     )
                 count += 1 
-            x = np.append(
-            x, new_x
-            )
-            times = np.append(times, t * self.__delta_t)
-
+            x = np.append(x, new_x)
+            times = np.append(times, t * self.__delta_t) # TODO can be generated at the start
             self.data.append([times[t], x[t], b[0]])
-            no_state_change = True
+            # no_state_change = True
             t += 1
             tau -= self.__delta_t
-            if(tau <= self.__delta_t):
+            if(tau - self.__delta_t < self.__delta_t):
                 self.breakpoints.append(times[t-1])
                 if(b[0] == self.__closed[0]):
                     b=self.__opened
                 else:
                     b=self.__closed
                 tau = self.__generator.exponential(b[1])
-                tau = 1.0 if tau < 1.0 else tau
+                dwell_times.append(tau)
+                # print(f"Dwell time {t}:{tau}")
                 random_force_values = np.append(random_force_values, self.__random_force(np.int32(tau//self.__delta_t), b[0] == self.__opened[0]))
-                no_state_change = False
+                # no_state_change = False
 
         self.data = np.array(self.data)
         self.breakpoints = np.array(self.breakpoints)        
         self.data_transposed = self.data.T
+        plt.hist(dwell_times, bins=40)
+        plt.show()
         # Temporary naming scheme
-        np.savetxt(f'outputs/data_{random_force}_{self.__D}_{self.__delta_t}_{list(self.__random_force_params.values()) if isinstance(self.__random_force_params, dict) else '_'}.csv', self.data, delimiter=',', header='time,position,state', fmt=['%.2f', '%e', '%d'])
+        np.savetxt(f'outputs/data_{random_force}_{self.__D}_{self.__delta_t}_{list(self.__random_force_params.values()) if isinstance(self.__random_force_params, dict) else '_'}.csv', self.data, delimiter=',', header='time,position,state', fmt=['%e', '%e', '%d'])
         # return self.data, self.breakpoints
-    
+
     def plot_time_series(self, figsize=(10, 5), title='Generated model'):
         """Plots generated time series.
 
@@ -217,6 +223,8 @@ class IonChannel:
         plt.figure(figsize=figsize)
         plt.title(title)
         plt.plot(self.data_transposed[0], self.data_transposed[1])
+        plt.vlines(x=self.breakpoints, ymin=np.min(self.data_transposed[1]), ymax=np.max(self.data_transposed[1]), color='red', linestyle='--')
+
         plt.xlabel("Time [s]")
         plt.ylabel("Current [pA]")
         plt.show()
@@ -252,14 +260,15 @@ class IonChannel:
         >>> data = np.random.random(10000)
         >>> ic.calculate_autocorrelation_acf(data)
         """
-        fig, axs = plt.subplots(1, 2, figsize=(12, 6))
-        fig.suptitle('Autocorrelation ' + title)
-        plot_acf(data, lags=lags, ax=axs[0], fft=True, title='Unmodified autocorrelation')
-        plot_acf(np.diff(data), lags=lags, ax=axs[1], fft=True, title='Modified autocorrelation')
-        if(not os.path.isdir(f"outputs/{title}")):
-            os.mkdir(f"outputs/{title}")
-        fig.savefig(f'outputs/{title}/acf.png')
-        plt.show()
+
+        # fig.suptitle('Autocorrelation ' + title)
+        fig = plot_acf(data, lags=lags, fft=True, title='FFT Autocorrelation ' + title)
+        return fig
+        # plot_acf(np.diff(data), lags=lags, ax=axs[1], fft=True, title='Modified autocorrelation')
+        # if(not os.path.isdir(f"outputs/{title}")):
+        #     os.mkdir(f"outputs/{title}")
+        # plt.savefig(f'outputs/{title}/acf.png')
+        # plt.show()
 
     def calculate_autocorrelation_dfa(self, data, title="test"):
         """ Calculates, shows and saves Detrended Fluctuation Analysis plots with Hurst exponent for autocorrelation. 
@@ -288,29 +297,48 @@ class IonChannel:
         >>> ic.calculate_autocorrelation_dfa(data)
         """
         a = fu.toAggregated(data)
-
         pydfa = fathon.DFA(a)
-
-        winSizes = fu.linRangeByStep(5, len(a))
+        winSizes = fu.linRangeByStep(5, len(a), step=5)
+        
         revSeg = True
         polOrd = 3
 
         n, F = pydfa.computeFlucVec(winSizes, revSeg=revSeg, polOrd=polOrd)
+        max_limit = np.log(winSizes[-1])
+        mid_point = winSizes[int(np.round(np.e**(max_limit//2), decimals=0))]
+        limits_list = np.array([[5, mid_point], [mid_point, winSizes[-1]]], dtype=int)
+        list_H, list_H_intercept = pydfa.multiFitFlucVec(limits_list)
 
-        H, H_intercept = pydfa.fitFlucVec()
-        plt.title('DFA ' + title)
-        plt.plot(np.log(n), np.log(F), 'ro')
-        plt.plot(np.log(n), H_intercept+H*np.log(n), 'k-', label='H = {:.2f}'.format(H))
-        plt.xlabel('ln(n)', fontsize=14)
-        plt.ylabel('ln(F(n))', fontsize=14)
-        plt.legend(loc=0, fontsize=14)
+        clrs = ['k', 'b', 'm', 'c', 'y']
+        stls = ['-', '--', '.-']
+        fig, ax = plt.subplots()
+        ax.plot(np.log(n), np.log(F), 'ro')
+        for i in range(len(list_H)):
+            n_rng = np.arange(limits_list[i][0], limits_list[i][1]+1)
+            ax.plot(np.log(n_rng), list_H_intercept[i]+list_H[i]*np.log(n_rng),
+                    clrs[i%len(clrs)]+stls[(i//len(clrs))%len(stls)], label='H = {:.2f}'.format(list_H[i]))
+        ax.set_xlabel('ln(n)', fontsize=14)
+        ax.set_ylabel('ln(F(n))', fontsize=14)
+        fig.suptitle('DFA', fontsize=14)
+        ax.legend(loc=0, fontsize=14)
+        return fig
 
+    def save_autocorrelation_plot(self, fig : plt.Figure, title : str, type : str):
+        """Saves ``fig`` into folder "outputs/``title`` with name ``type``.
+
+        Parameters
+        ----------
+        fig : matplotlib.pyplot.Figure
+            Should be figure genrated by ``calculate_autocorrelation_acf`` or ``calculate_autocorrelation_dfa``.
+        title : str
+            Best if it's title of ``calculate_autocorrelation_acf`` or ``calculate_autocorrelation_dfa``.
+        type : str
+            Name of figure "``type``.png".
+        """
         if(not os.path.isdir(f"outputs/{title}")):
             os.mkdir(f"outputs/{title}")
-        plt.savefig(f'outputs/{title}/dfa.png')
-        plt.show()
+        fig.savefig(f'outputs/{title}/{type}.png')
 
-    
 class InteractiveIonChannel():
     """
     InteractiveIonChannel
@@ -326,15 +354,15 @@ class InteractiveIonChannel():
     def __init__(self):
         """Constructor of InteractiveIonChannel class
         """
-        self.__a_slider = FloatSlider(min=0.0, max=10.0, step=0.1, value=1, description='a')
+        self.__a_slider = FloatSlider(min=50.0, max=2000.0, step=0.1, value=100.0, description='a')
         self.__closed_0_slider = IntSlider(min=-10, max=10, step=1, value=-1, description='Closed value')
-        self.__closed_1_slider = FloatSlider(min=0.0, max=100.0, step=0.1, value=6.0, description='Closed avg time')
+        self.__closed_1_slider = FloatSlider(min=0.0, max=100.0, step=0.1, value=24.0, description='Closed avg time(scaled by delta_t)')
         self.__opened_0_slider = IntSlider(min=-10, max=10, step=1, value=1, description='Opened value')
-        self.__opened_1_slider = FloatSlider(min=0.0, max=100.0, step=0.1, value=2.0, description='Opened avg time')
+        self.__opened_1_slider = FloatSlider(min=0.0, max=100.0, step=0.1, value=8.0, description='Opened avg time(scaled by delta_t)')
         self.__D_slider = FloatSlider(min=0.1, max=100.0, step=0.1, value=2.0, description='D')
         self.__delta_t_slider = SelectionSlider(
-            options=[10**-i for i in range(1, 5)],
-            value=0.01,
+            options=[10**-i for i in range(3, 6)],
+            value=0.0001,
             description='Delta t',
         )
         self.__records_slider = IntSlider(min=1000, max=100000, step=1000, value=50000, description='Records')
@@ -346,10 +374,11 @@ class InteractiveIonChannel():
         )
 
         self.__autocorrelation_dropdown = Dropdown(
-            options = ['DFA', 'FFT', 'Both'],
-            value = 'Both',
+            options = ['DFA', 'FFT', 'All'],
+            value = 'All',
             description = 'Autocorrelation method'
         )
+        self.__fft_lags = IntSlider(min=30, max=200, step=10, value=100, description='FFT lags')
         self.__takes_previous = Checkbox(value=True, description='Takes previous values')
         self.__seed_select = IntSlider(min=0, max=99999, value=12345, step=1, description='Seed')
         self.__force_params_box = VBox()
@@ -399,7 +428,8 @@ class InteractiveIonChannel():
             self.__force_params_box,
             self.__takes_previous,
             self.__random_force_dropdown,
-            self.__autocorrelation_dropdown
+            self.__autocorrelation_dropdown,
+            self.__fft_lags
         )
         run_button = Button(description="Run Model")
         run_button.on_click(self.__on_button_click)
@@ -446,9 +476,13 @@ class InteractiveIonChannel():
         data = self.ion_channel.data_transposed[1] # because self.data is shape (records, 3)
         match self.__autocorrelation_dropdown.value:
             case 'DFA': 
-                self.ion_channel.calculate_autocorrelation_dfa(data, title=name)
+                fig = self.ion_channel.calculate_autocorrelation_dfa(data, title=name)
+                self.ion_channel.save_autocorrelation_plot(fig, name, 'dfa')
             case 'FFT':
-                self.ion_channel.calculate_autocorrelation_acf(data, title=name)
+                fig = self.ion_channel.calculate_autocorrelation_acf(data, lags=self.__fft_lags.value, title=name)
+                self.ion_channel.save_autocorrelation_plot(fig, name, 'acf')
             case _:
-                self.ion_channel.calculate_autocorrelation_acf(data, title=name)   
-                self.ion_channel.calculate_autocorrelation_dfa(data, title=name)
+                fig = self.ion_channel.calculate_autocorrelation_acf(data, lags=self.__fft_lags.value,title=name)
+                self.ion_channel.save_autocorrelation_plot(fig, name, 'acf')
+                fig = self.ion_channel.calculate_autocorrelation_dfa(data, title=name)
+                self.ion_channel.save_autocorrelation_plot(fig, name, 'dfa')    
