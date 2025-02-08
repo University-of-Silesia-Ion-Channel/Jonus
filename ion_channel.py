@@ -6,7 +6,7 @@ import fathon
 from fathon import fathonUtils as fu
 import os
 import numpy as np
-from ipywidgets import FloatSlider, IntSlider, Dropdown, SelectionSlider, VBox, Button, Checkbox, fixed
+from ipywidgets import FloatSlider, IntSlider, Dropdown, SelectionSlider, VBox, Button, Checkbox
 from IPython.display import display
 
 class IonChannel:
@@ -266,12 +266,12 @@ class IonChannel:
         """
         Calculates, shows and saves Detrended Fluctuation Analysis plots with Hurst exponent for autocorrelation. 
         Depending on the value of H it is:
-            * H < 0.5 - anti-correlated
-            * H around 0.5 - uncorrelated, white noise
-            * H > 0.5 - correlated
-            * H around 1 - 1/f-noise, pink noise
-            * H > 1 - non-stationary, unbounded
-            * H around 1.5 - Brownian noise
+        * H < 0.5 - anti-correlated
+        * H around 0.5 - uncorrelated, white noise
+        * H > 0.5 - correlated
+        * H around 1 - 1/f-noise, pink noise
+        * H > 1 - non-stationary, unbounded
+        * H around 1.5 - Brownian noise
         ----------    
 
         Parameters
@@ -484,7 +484,6 @@ class InteractiveIonChannel():
         """
         Callback for the 'Run Model'/'Run Model (test)' button.
         """
-        print(f"Button {b.description} clicked", flush=True)
         self.force_params = {child.description: child.value for child in self.__force_params_box.children}
         if (b.description == 'Run Model'):
             self.__ion_channel_interactive(
