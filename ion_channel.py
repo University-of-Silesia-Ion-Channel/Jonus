@@ -1,11 +1,12 @@
 import matplotlib.pyplot as plt
+import matplotlib.transforms as mtransforms
 from scipy.stats import levy_stable
 from statsmodels.graphics.tsaplots import plot_acf
 import fathon
 from fathon import fathonUtils as fu
 import os
 import numpy as np
-from ipywidgets import FloatSlider, IntSlider, Dropdown, SelectionSlider, VBox, Button, Checkbox
+from ipywidgets import FloatSlider, IntSlider, Dropdown, SelectionSlider, VBox, Button, Checkbox, fixed
 from IPython.display import display
 
 class IonChannel:
@@ -28,36 +29,38 @@ class IonChannel:
     generate_data(random_force='Gauss'):
         Generates Ion Channel time series data
     """
-    def __init__(self, a=1, closed=(-1, 6.0), opened=(1, 2.0), D=0.5, delta_t=0.01, records=50000, takes_prev_vals=True, seed=12345, **random_force_params):
+
+    def __init__(self, a=100, closed=(-1, 48.0), opened=(1, 12.0), D=2.0, delta_t=0.0001, records=50000, takes_prev_vals=True, seed=12345, **random_force_params):
         """Constructor of ``IonChannel`` class
 
         Parameters
         ----------
         a : int, optional
-            a coefficient used in ``__model_force_square``, by default 1
+            a coefficient used in ``__model_force_square``, by default 100
         closed : tuple, optional
             ``closed[0]`` has value of current in [pA] of when channel is closed.
 
-            ``closed[1]`` has value of average time the channel is closed. By default (-1, 6.0)
+            ``closed[1]`` has value of average time the channel is closed. By default (-1, 48.0)
         opened : tuple, optional
             ``opened[0]`` has value of current in [pA] of when channel is opened.
             
-            ``opened[1]`` has value of average time the channel is opened. By default (1, 2.0)
+            ``opened[1]`` has value of average time the channel is opened. By default (1, 12.0)
         D : float, optional
-            Coefficient representing temperature. The larger it is the bigger the noise, by default 0.5
+            Coefficient representing temperature. The larger it is the bigger the noise, by default 2.0
         delta_t : float, optional
-            Time series spacing. Should be magnification of 10 to negative power, by default 0.01
+            Time series spacing. Should be magnification of 10 to negative power, by default 0.0001
         records : int, optional
             Number of records to generate, by default 50000
         takes_prev_vals : bool, optional
             Was used for testing. Keep at ``True``, by default True
         seed : int, optional
-            Used for seeded generation. Creates np.random.Generator(np.random.PCG64(seed=seed)), by default 12345
+            Used for seeded generation. Creates ``np.random.Generator(np.random.PCG64(seed=seed))``, by default 12345
 
         Notes
         -----
         ``closed[1]`` > ``opened[1]``
         """
+        assert closed[1] > opened[1], "Closed state is on average open longer than opened."
         self.__a = a
         self.__closed = list(closed)
         self.__opened = list(opened)
@@ -69,19 +72,17 @@ class IonChannel:
         self.__takes_prev_vals = takes_prev_vals
         self.__random_force_params = random_force_params
         self.__generator = np.random.Generator(np.random.PCG64(seed=seed))
-        self.__threshold = 1.0 
+        self.__threshold = 5.0
         self.data = []
         self.breakpoints = []
 
-    def __random_force_gauss(self, records, opened_state):
+    def __random_force_gauss(self, records):
         """Function generates random force values using standard gaussian distribution.
 
         Parameters
         ----------
         records : _int_
             Number of records to generate.
-        opened_state : _bool_
-            Placeholder.
 
         Returns
         -------
@@ -109,15 +110,13 @@ class IonChannel:
         return -self.__a*(x - b)
        
     # takes two common parameters and dictionary with 5 parameters needed for levy_stable.rvs function
-    def __random_force_levy(self, records, opened_state):
+    def __random_force_levy(self, records):
         """Function generates random force values using ``levy_stable`` distribution.
 
         Parameters
         ----------
         records : int
             Number of records to generate.
-        opened_state : bool 
-            State of ion channel.
 
         Returns
         -------
@@ -125,7 +124,7 @@ class IonChannel:
             Array with random force values.
         """
         args = self.__random_force_params
-        r = levy_stable.rvs(alpha=args['alpha'], beta=args['beta_opened' if opened_state else 'beta_closed'], loc=args['location'], scale=args['scale'], size=records, random_state=self.__generator)
+        r = levy_stable.rvs(alpha=args['alpha'], beta=1.0 if self.__opened_state else -1.0, loc=0.0, scale=args['scale'], size=records, random_state=self.__generator)
         return (self.__delta_t * self.__D) ** 0.5 * r  # random force
     
     def _generate_data(self, random_force='Gauss'):
@@ -144,41 +143,37 @@ class IonChannel:
             self.__random_force = self.__random_force_levy
 
         t = 0
-        dwell_times = []
+        self.dwell_times = []
         # generating first state of ion channel (opened/closed)
         b = self.__generator.choice([self.__closed, self.__opened])
         tau = self.__generator.exponential(b[1])
-        dwell_times.append(tau)
-        # print(f"Dwell time {t}:{tau}")
-        random_force_values = self.__random_force(np.int32(tau//self.__delta_t), b[0] == self.__opened[0])
+        self.dwell_times.append(tau)
+        self.__opened_state = b[0] == self.__opened[0]
+        random_force_values = self.__random_force(np.int32(tau//self.__delta_t))
         
         x = np.array([b[0]], dtype=np.float32)
-        times = np.array([t], dtype=np.float32)
+        times = np.linspace(0, 5*0.0001, 50000, endpoint=False)
         self.data.append([times[0], x[0], b[0]])
         t += 1
-        # no_state_change = True # needed so it doesn't take previous value of previous state (closed and opened are seperated and changes are more acute)
         while t < self.__records:
             count = 0
             new_x = (
-                # no_state_change *
                 self.__takes_prev_vals * x[t - 1] +
                 self.__model_force_square(x[t - 1], b[0]) * self.__delta_t +
                 random_force_values[t - 1]
                 )
-            while np.abs(np.abs(new_x) - self.__threshold) > np.abs(b[0]) and count < 100:
+            while np.abs(new_x - b[0]) > self.__threshold and count < 100:
                 # generate a new smaller x
-                random_force_values[t - 1] = self.__random_force(1, b[0] == self.__opened[0])[0]
+                self.__opened_state = b[0] == self.__opened[0]
+                random_force_values[t - 1] = self.__random_force(1)[0]
                 new_x = (
-                    # no_state_change *
                     self.__takes_prev_vals * x[t - 1] +
                     self.__model_force_square(x[t - 1], b[0]) * self.__delta_t +
                     random_force_values[t - 1]
                     )
                 count += 1 
             x = np.append(x, new_x)
-            times = np.append(times, t * self.__delta_t) # TODO can be generated at the start
             self.data.append([times[t], x[t], b[0]])
-            # no_state_change = True
             t += 1
             tau -= self.__delta_t
             if(tau - self.__delta_t < self.__delta_t):
@@ -188,29 +183,28 @@ class IonChannel:
                 else:
                     b=self.__closed
                 tau = self.__generator.exponential(b[1])
-                dwell_times.append(tau)
-                # print(f"Dwell time {t}:{tau}")
-                random_force_values = np.append(random_force_values, self.__random_force(np.int32(tau//self.__delta_t), b[0] == self.__opened[0]))
-                # no_state_change = False
+                self.dwell_times.append(tau)
+                self.__opened_state = b[0] == self.__opened[0]
+                random_force_values = np.append(random_force_values, self.__random_force(np.int32(tau//self.__delta_t)))
 
         self.data = np.array(self.data)
         self.breakpoints = np.array(self.breakpoints)        
         self.data_transposed = self.data.T
-        plt.hist(dwell_times, bins=40)
-        plt.show()
-        # Temporary naming scheme
         np.savetxt(f'outputs/data_{random_force}_{self.__D}_{self.__delta_t}_{list(self.__random_force_params.values()) if isinstance(self.__random_force_params, dict) else '_'}.csv', self.data, delimiter=',', header='time,position,state', fmt=['%e', '%e', '%d'])
-        # return self.data, self.breakpoints
 
-    def plot_time_series(self, figsize=(10, 5), title='Generated model'):
+    def plot_time_series(self, fig, ax : plt.Axes, title='Generated model', plot_breakpoints=False):
         """Plots generated time series.
 
         Parameters
         ----------
-        figsize : tuple, optional
-            Figure size, by default (10, 5)
+        fig : matplotlib.pyplot.Figure
+            Figure on which time series is plotted.
+        ax : matplotlib.pyplot.Axes
+            Subplot ax to put plot into.
         title : str, optional
             Title of plot, by default 'Generated model'
+        plot_breakpoints : bool
+            True if lines on breakpoints should be plotted, by default False.
         
         Raises
         ------
@@ -218,39 +212,44 @@ class IonChannel:
             With message "Data wasn't generated"
         """
         assert len(self.data_transposed) > 0, "Data wasn't generated"
-        
-        plt.clf()  
-        plt.figure(figsize=figsize)
-        plt.title(title)
-        plt.plot(self.data_transposed[0], self.data_transposed[1])
-        plt.vlines(x=self.breakpoints, ymin=np.min(self.data_transposed[1]), ymax=np.max(self.data_transposed[1]), color='red', linestyle='--')
+        ax.set_title(title)
+        ax.plot(self.data_transposed[0], self.data_transposed[1])
+        if plot_breakpoints:
+            ax.vlines(x=self.breakpoints, ymin=np.min(self.data_transposed[1]), ymax=np.max(self.data_transposed[1]), color='red', linestyle='--')
+        ax.set_xlabel("Time [s]")
+        ax.set_ylabel("Current [pA]")
+        return fig, ax
 
-        plt.xlabel("Time [s]")
-        plt.ylabel("Current [pA]")
-        plt.show()
-
-    def plot_time_series_histogram(self, bins=100):
+    def plot_time_series_histogram(self, fig, ax, bins=100):
         """Plots histogram of time series with specified amount of ``bins``.
 
         Parameters
         ----------
+        fig : matplotlib.pyplot.Figure
+            Figure on which time series histogram is plotted.
+        ax : matplotlib.pyplot.Axes
+            Subplot ax to put plot into.
         bins : int, optional
-            Number of bins, by default 100
+            Number of bins, by default 100.
         """
-        plt.hist(self.data_transposed[1], bins=bins)
-        plt.show()
+        # fig, ax = plt.subplots()
+        # fig.suptitle("Histogram of generated data")
+        ax.hist(self.data_transposed[1], bins=bins)
+        return fig, ax
 
-    def calculate_autocorrelation_acf(self, data, lags=30, title="test"):
+    def calculate_autocorrelation_acf(self, data, fig, ax, lags=100):
         """Function calculates and plots autocorrelation function.
         
         Parameters
         ----------
         data : ndarray
             1D array containing data to calculate autocorrelation on.
+        fig : matplotlib.pyplot.Figure
+            Figure on which autocorrelation is plotted.
+        ax : matplotlib.pyplot.Axes
+            Subplot ax to put plot into.
         lags : int, optional
             Number of lags to calculate. Defaults to 30.
-        title : str, optional
-            Directory to save plot to. Defaults to "test"
 
         Examples:
         ---------
@@ -260,18 +259,12 @@ class IonChannel:
         >>> data = np.random.random(10000)
         >>> ic.calculate_autocorrelation_acf(data)
         """
+        fig = plot_acf(data, ax=ax, lags=lags, fft=True, title='FFT')
+        return fig, ax
 
-        # fig.suptitle('Autocorrelation ' + title)
-        fig = plot_acf(data, lags=lags, fft=True, title='FFT Autocorrelation ' + title)
-        return fig
-        # plot_acf(np.diff(data), lags=lags, ax=axs[1], fft=True, title='Modified autocorrelation')
-        # if(not os.path.isdir(f"outputs/{title}")):
-        #     os.mkdir(f"outputs/{title}")
-        # plt.savefig(f'outputs/{title}/acf.png')
-        # plt.show()
-
-    def calculate_autocorrelation_dfa(self, data, title="test"):
-        """ Calculates, shows and saves Detrended Fluctuation Analysis plots with Hurst exponent for autocorrelation. 
+    def calculate_autocorrelation_dfa(self, data, fig, ax):
+        """
+        Calculates, shows and saves Detrended Fluctuation Analysis plots with Hurst exponent for autocorrelation. 
         Depending on the value of H it is:
             * H < 0.5 - anti-correlated
             * H around 0.5 - uncorrelated, white noise
@@ -285,8 +278,10 @@ class IonChannel:
         ----------
         data : ndarray
             1D array containing data to calculate autocorrelation on.
-        title : str, optional 
-            Title of figure and directory name to save plots to. Defaults to "test".
+        fig : matplotlib.pyplot.Figure
+            Figure on which autocorrelation is plotted.
+        ax : matplotlib.pyplot.Axes
+            Subplot ax to put plot into.
 
         Examples:
         ---------
@@ -311,7 +306,6 @@ class IonChannel:
 
         clrs = ['k', 'b', 'm', 'c', 'y']
         stls = ['-', '--', '.-']
-        fig, ax = plt.subplots()
         ax.plot(np.log(n), np.log(F), 'ro')
         for i in range(len(list_H)):
             n_rng = np.arange(limits_list[i][0], limits_list[i][1]+1)
@@ -319,25 +313,38 @@ class IonChannel:
                     clrs[i%len(clrs)]+stls[(i//len(clrs))%len(stls)], label='H = {:.2f}'.format(list_H[i]))
         ax.set_xlabel('ln(n)', fontsize=14)
         ax.set_ylabel('ln(F(n))', fontsize=14)
-        fig.suptitle('DFA', fontsize=14)
+        ax.set_title('DFA', fontsize=14)
         ax.legend(loc=0, fontsize=14)
-        return fig
+        return fig, ax
 
-    def save_autocorrelation_plot(self, fig : plt.Figure, title : str, type : str):
-        """Saves ``fig`` into folder "outputs/``title`` with name ``type``.
+    def save_figure(self, fig : plt.Figure, title : str, name = "figure", with_subfigures=True):
+        """Saves ``fig`` into folder "outputs2/``title``.
 
         Parameters
         ----------
         fig : matplotlib.pyplot.Figure
-            Should be figure genrated by ``calculate_autocorrelation_acf`` or ``calculate_autocorrelation_dfa``.
+            Can be figure generated by: 
+            - ```calculate_autocorrelation_acf```
+            - ```calculate_autocorrelation_dfa```
+            - any figure
         title : str
-            Best if it's title of ``calculate_autocorrelation_acf`` or ``calculate_autocorrelation_dfa``.
-        type : str
-            Name of figure "``type``.png".
+            Folder named by what data was generated.
+        name : str
+            Name of figure "``name``.png".
+        with_subfigures : bool
+            Use only if ``fig`` is a subplot with dimensions 2x2.
         """
-        if(not os.path.isdir(f"outputs/{title}")):
-            os.mkdir(f"outputs/{title}")
-        fig.savefig(f'outputs/{title}/{type}.png')
+        if not os.path.exists("./outputs2"):
+            os.mkdir("./outputs2")
+        if not os.path.exists(f"./outputs2/{title}"):
+            os.mkdir(f"./outputs2/{title}")
+        fig.savefig(f'./outputs2/{title}/{name}.png')
+        if with_subfigures:
+            transformation = fig.transFigure - fig.dpi_scale_trans
+            fig.savefig(f'./outputs2/{title}/sub_figure1.png', bbox_inches=mtransforms.Bbox([[0, 0], [0.5, 0.495]]).transformed(transformation))
+            fig.savefig(f'./outputs2/{title}/sub_figure2.png', bbox_inches=mtransforms.Bbox([[0.5, 0], [1.0, 0.5]]).transformed(transformation))
+            fig.savefig(f'./outputs2/{title}/sub_figure3.png', bbox_inches=mtransforms.Bbox([[0, 0.505], [0.5, 0.978]]).transformed(transformation))
+            fig.savefig(f'./outputs2/{title}/sub_figure4.png', bbox_inches=mtransforms.Bbox([[0.5, 0.5], [1, 0.978]]).transformed(transformation))
 
 class InteractiveIonChannel():
     """
@@ -355,11 +362,11 @@ class InteractiveIonChannel():
         """Constructor of InteractiveIonChannel class
         """
         self.__a_slider = FloatSlider(min=50.0, max=2000.0, step=0.1, value=100.0, description='a')
-        self.__closed_0_slider = IntSlider(min=-10, max=10, step=1, value=-1, description='Closed value')
-        self.__closed_1_slider = FloatSlider(min=0.0, max=100.0, step=0.1, value=24.0, description='Closed avg time(scaled by delta_t)')
-        self.__opened_0_slider = IntSlider(min=-10, max=10, step=1, value=1, description='Opened value')
-        self.__opened_1_slider = FloatSlider(min=0.0, max=100.0, step=0.1, value=8.0, description='Opened avg time(scaled by delta_t)')
-        self.__D_slider = FloatSlider(min=0.1, max=100.0, step=0.1, value=2.0, description='D')
+        self.__closed_0_slider = IntSlider(min=-50, max=50, step=1, value=-1, description='Closed value')
+        self.__closed_1_slider = FloatSlider(min=0.0, max=100.0, step=0.1, value=33.0, description='Closed avg time(scaled by delta_t)')
+        self.__opened_0_slider = IntSlider(min=-50, max=50, step=1, value=1, description='Opened value')
+        self.__opened_1_slider = FloatSlider(min=0.0, max=100.0, step=0.1, value=11.0, description='Opened avg time(scaled by delta_t)')
+        self.__D_slider = FloatSlider(min=0.01, max=100.0, step=0.01, value=10.00, description='D')
         self.__delta_t_slider = SelectionSlider(
             options=[10**-i for i in range(3, 6)],
             value=0.0001,
@@ -399,12 +406,9 @@ class InteractiveIonChannel():
         force_type = self.__random_force_dropdown.value
         if force_type.lower() == str.lower('Levy'):
             # Define widgets specific to 'Other Force'
-            alpha = FloatSlider(min=0, max=2, step=0.01, value=1.9, description='alpha')
-            beta_opened = FloatSlider(min=-1.0, max=0.0, step=0.01, value=-1.0, description='beta_opened')
-            beta_closed = FloatSlider(min=0.0, max=1, step=0.01, value=1.0, description='beta_closed')
-            loc = IntSlider(min=0, max=100, step=1, value=0, description='location')
+            alpha = FloatSlider(min=1.5, max=1.99, step=0.01, value=1.9, description='alpha')
             scale = FloatSlider(min=0, max=100, step=0.1, value=0.1, description='scale')
-            self.__force_params_box.children = [alpha, beta_closed, beta_opened, loc, scale]
+            self.__force_params_box.children = [alpha, scale]
         else:
             self.__force_params_box.children = []
     
@@ -435,54 +439,92 @@ class InteractiveIonChannel():
         run_button.on_click(self.__on_button_click)
         display(run_button)
 
-    def __on_button_click(self, b):
-        """
-        Callback for the 'Run Model' button.
-        """
-        print("Button Clicked")
-        force_params = {child.description: child.value for child in self.__force_params_box.children}
-        self.__ion_channel_interactive(
-            self.__a_slider.value,
-            self.__closed_0_slider.value,
-            self.__closed_1_slider.value,
-            self.__opened_0_slider.value,
-            self.__opened_1_slider.value,
-            self.__D_slider.value,
-            self.__delta_t_slider.value,
-            self.__records_slider.value,
-            self.__random_force_dropdown.value,
-            self.__takes_previous.value,
-            self.__seed_select.value,
-            **force_params
-        )
+        run_button_test = Button(description="Run Model (Test)")
+        run_button_test.on_click(self.__on_button_click)
+        display(run_button_test)
         
-        params_str = (
-            f"a: {self.__a_slider.value}, "
-            f"closed_0: {self.__closed_0_slider.value}, "
-            f"closed_1: {self.__closed_1_slider.value}, "
-            f"opened_0: {self.__opened_0_slider.value}, "
-            f"opened_1: {self.__opened_1_slider.value}, "
-            f"D: {self.__D_slider.value}, "
-            f"delta_t: {self.__delta_t_slider.value}, "
-            f"records: {self.__records_slider.value}, "
-            f"random_force: {self.__random_force_dropdown.label}, "
-            f"force_params: {', '.join([f'{key}: {value}' for key, value in force_params.items()])} "
-            f"seed: {self.__seed_select.value}"
-        )
-        self.ion_channel.plot_time_series()
-        self.ion_channel.plot_time_series_histogram()
-        print(params_str)
-        name = f"{self.__random_force_dropdown.value}_D{self.__D_slider.value}_a{self.__a_slider.value}_{self.__takes_previous.value}_{self.__seed_select.value}"
+
+    def __on_click_event(self, D):
+        """Helper method for ``__on_button_click__``. Generates data(plots) according to users input in ``interact``.
+        
+        Parameters
+        ----------
+        D : float
+            Value of D.
+        """
+        fig, axs = plt.subplots(2, 2, constrained_layout=True)
+        fig.set_size_inches(16, 12)
+        self.ion_channel.plot_time_series(fig, axs[0][0])
+        self.ion_channel.plot_time_series_histogram(fig, axs[0][1])
+        match self.__random_force_dropdown.value:
+            case "Gauss":
+                name = f"{self.__random_force_dropdown.value}_D{D}_a{self.__a_slider.value}_{self.__seed_select.value}"
+            case "Levy":
+                name = f"{self.__random_force_dropdown.value}_D{D}_a{self.__a_slider.value}_alpha{self.force_params["alpha"]}_scale{self.force_params["scale"]}_{self.__seed_select.value}"
         data = self.ion_channel.data_transposed[1] # because self.data is shape (records, 3)
+        fig.suptitle(name)
         match self.__autocorrelation_dropdown.value:
             case 'DFA': 
-                fig = self.ion_channel.calculate_autocorrelation_dfa(data, title=name)
-                self.ion_channel.save_autocorrelation_plot(fig, name, 'dfa')
+                fig, axs[1][0] = self.ion_channel.calculate_autocorrelation_dfa(data, fig, axs[1][0])
             case 'FFT':
-                fig = self.ion_channel.calculate_autocorrelation_acf(data, lags=self.__fft_lags.value, title=name)
-                self.ion_channel.save_autocorrelation_plot(fig, name, 'acf')
+                fig, axs[1][0]  = self.ion_channel.calculate_autocorrelation_acf(data, fig, axs[1][0], lags=self.__fft_lags.value)
             case _:
-                fig = self.ion_channel.calculate_autocorrelation_acf(data, lags=self.__fft_lags.value,title=name)
-                self.ion_channel.save_autocorrelation_plot(fig, name, 'acf')
-                fig = self.ion_channel.calculate_autocorrelation_dfa(data, title=name)
-                self.ion_channel.save_autocorrelation_plot(fig, name, 'dfa')    
+                fig, axs[1][0] = self.ion_channel.calculate_autocorrelation_acf(data, fig, axs[1][0], lags=self.__fft_lags.value)
+                fig, axs[1][1] = self.ion_channel.calculate_autocorrelation_dfa(data, fig, axs[1][1])
+
+        self.ion_channel.save_figure(fig, name)
+
+    def __multi_on_click_event(self, index):
+        data = self.ion_channel.data_transposed[1]
+        self.__fig_autocorr, self.__axs_autocorr[index][0] = self.ion_channel.calculate_autocorrelation_acf(data, self.__fig_autocorr, self.__axs_autocorr[index][0], lags=self.__fft_lags.value)
+        self.__fig_autocorr, self.__axs_autocorr[index][1] = self.ion_channel.calculate_autocorrelation_dfa(data, self.__fig_autocorr, self.__axs_autocorr[index][1])
+        
+
+    def __on_button_click(self, b : Button):
+        """
+        Callback for the 'Run Model'/'Run Model (test)' button.
+        """
+        print(f"Button {b.description} clicked", flush=True)
+        self.force_params = {child.description: child.value for child in self.__force_params_box.children}
+        if (b.description == 'Run Model'):
+            self.__ion_channel_interactive(
+                self.__a_slider.value,
+                self.__closed_0_slider.value,
+                self.__closed_1_slider.value,
+                self.__opened_0_slider.value,
+                self.__opened_1_slider.value,
+                self.__D_slider.value,
+                self.__delta_t_slider.value,
+                self.__records_slider.value,
+                self.__random_force_dropdown.value,
+                self.__takes_previous.value,
+                self.__seed_select.value,
+                **self.force_params
+            )
+            self.__on_click_event(self.__D_slider.value)
+        else:
+            D_list = [0.01, 0.1, 1, 2, 5, 10, 100]
+            D_count = len(D_list)
+            self.__fig_autocorr , self.__axs_autocorr = plt.subplots(D_count, 2, constrained_layout=True)
+            self.__fig_autocorr.set_size_inches(12, 4 * D_count)
+            for ind, D in enumerate(D_list):
+                self.__ion_channel_interactive(
+                    self.__a_slider.value,
+                    self.__closed_0_slider.value,
+                    self.__closed_1_slider.value,
+                    self.__opened_0_slider.value,
+                    self.__opened_1_slider.value,
+                    D,
+                    self.__delta_t_slider.value,
+                    self.__records_slider.value,
+                    self.__random_force_dropdown.value,
+                    self.__takes_previous.value,
+                    self.__seed_select.value,
+                    **self.force_params
+                )
+                self.__on_click_event(D)
+                self.__multi_on_click_event(index = ind)
+            name = f"{self.__random_force_dropdown.value}"
+            self.__fig_autocorr.suptitle(name + f" D = {D_list}")
+            self.ion_channel.save_figure(self.__fig_autocorr, name, with_subfigures = False)
+           
