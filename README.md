@@ -43,10 +43,10 @@ Feel free to edit, reproduce and deploy any changes done to my repository.
 
 ## Authors and acknowledgment
 This project wouldn't be possible without help of:
-- [dr hab. prof. UŚ Łukasz Machura](https://lukaszmachura.github.io/)
-- [dr Paulina Trybek](https://www.researchgate.net/profile/Paulina-Trybek)
+- [DSc Łukasz Machura](https://lukaszmachura.github.io/)
+- [PhD Paulina Trybek](https://www.researchgate.net/profile/Paulina-Trybek)
 
-And my dearest friend: [inż. Jakub Kraus](https://www.researchgate.net/profile/Paulina-Trybek).
+And my dearest friend: [BEng Jakub Kraus](https://www.researchgate.net/profile/Paulina-Trybek).
 
 ## License
 [GNU Public License](LICENSE)
