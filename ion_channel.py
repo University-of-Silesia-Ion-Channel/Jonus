@@ -190,7 +190,8 @@ class IonChannel:
         self.data = np.array(self.data)
         self.breakpoints = np.array(self.breakpoints)        
         self.data_transposed = self.data.T
-        np.savetxt(f'outputs/data_{random_force}_{self.__D}_{self.__delta_t}_{list(self.__random_force_params.values()) if isinstance(self.__random_force_params, dict) else '_'}.csv', self.data, delimiter=',', header='time,position,state', fmt=['%e', '%e', '%d'])
+        save_file = os.path.join(os.getcwd(), 'outputs', f'data_{random_force}_{self.__D}_{self.__delta_t}_{list(self.__random_force_params.values()) if isinstance(self.__random_force_params, dict) else '_'}.csv')
+        np.savetxt(save_file, self.data, delimiter=',', header='time,position,state', fmt=['%e', '%e', '%d'])
 
     def plot_time_series(self, fig, ax : plt.Axes, title='Generated model', plot_breakpoints=False):
         """Plots generated time series.
@@ -318,7 +319,7 @@ class IonChannel:
         return fig, ax
 
     def save_figure(self, fig : plt.Figure, title : str, name = "figure", with_subfigures=True):
-        """Saves ``fig`` into folder "outputs2/``title``.
+        """Saves ``fig`` into folder *outputs2* subfolder ``title`` and file name ``name`` .
 
         Parameters
         ----------
@@ -334,17 +335,19 @@ class IonChannel:
         with_subfigures : bool
             Use only if ``fig`` is a subplot with dimensions 2x2.
         """
-        if not os.path.exists("./outputs2"):
-            os.mkdir("./outputs2")
-        if not os.path.exists(f"./outputs2/{title}"):
-            os.mkdir(f"./outputs2/{title}")
-        fig.savefig(f'./outputs2/{title}/{name}.png')
+        path = os.path.join(os.getcwd(), 'outputs2')
+        if not os.path.exists(path):
+            os.mkdir(path)
+        path_with_subfolder = os.path.join(path, title)
+        if not os.path.exists(path_with_subfolder):
+            os.mkdir(path_with_subfolder)
+        fig.savefig(os.path.join(path_with_subfolder, f"{name}.png"))
         if with_subfigures:
             transformation = fig.transFigure - fig.dpi_scale_trans
-            fig.savefig(f'./outputs2/{title}/sub_figure1.png', bbox_inches=mtransforms.Bbox([[0, 0], [0.5, 0.495]]).transformed(transformation))
-            fig.savefig(f'./outputs2/{title}/sub_figure2.png', bbox_inches=mtransforms.Bbox([[0.5, 0], [1.0, 0.5]]).transformed(transformation))
-            fig.savefig(f'./outputs2/{title}/sub_figure3.png', bbox_inches=mtransforms.Bbox([[0, 0.505], [0.5, 0.978]]).transformed(transformation))
-            fig.savefig(f'./outputs2/{title}/sub_figure4.png', bbox_inches=mtransforms.Bbox([[0.5, 0.5], [1, 0.978]]).transformed(transformation))
+            fig.savefig(os.path.join(path_with_subfolder, 'sub_figure1.png'), bbox_inches=mtransforms.Bbox([[0, 0], [0.5, 0.495]]).transformed(transformation))
+            fig.savefig(os.path.join(path_with_subfolder, 'sub_figure2.png'), bbox_inches=mtransforms.Bbox([[0.5, 0], [1.0, 0.5]]).transformed(transformation))
+            fig.savefig(os.path.join(path_with_subfolder, 'sub_figure3.png'), bbox_inches=mtransforms.Bbox([[0, 0.505], [0.5, 0.978]]).transformed(transformation))
+            fig.savefig(os.path.join(path_with_subfolder, 'sub_figure4.png'), bbox_inches=mtransforms.Bbox([[0.5, 0.5], [1, 0.978]]).transformed(transformation))
 
 class InteractiveIonChannel():
     """
@@ -472,7 +475,7 @@ class InteractiveIonChannel():
                 fig, axs[1][0] = self.ion_channel.calculate_autocorrelation_acf(data, fig, axs[1][0], lags=self.__fft_lags.value)
                 fig, axs[1][1] = self.ion_channel.calculate_autocorrelation_dfa(data, fig, axs[1][1])
 
-        self.ion_channel.save_figure(fig, name)
+        self.ion_channel.save_figure(fig, title=name)
 
     def __multi_on_click_event(self, index):
         data = self.ion_channel.data_transposed[1]
@@ -525,5 +528,5 @@ class InteractiveIonChannel():
                 self.__multi_on_click_event(index = ind)
             name = f"{self.__random_force_dropdown.value}"
             self.__fig_autocorr.suptitle(name + f" D = {D_list}")
-            self.ion_channel.save_figure(self.__fig_autocorr, name, with_subfigures = False)
+            self.ion_channel.save_figure(self.__fig_autocorr, title=name, with_subfigures = False)
            
