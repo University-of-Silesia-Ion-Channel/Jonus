@@ -1,7 +1,7 @@
 # JonUŚ - Ion Channel Model
 
 ## Description
-Comprehensive and easy tool to generate time series representing **Ion Channel** using a mathematical model. 
+Comprehensive, easy and multiplatform tool to generate time series representing **Ion Channel** using a mathematical model. 
 
 Some properties, that the tool has are:
 - easy to use inside a **Jupyter Notebook** framework,
@@ -46,10 +46,10 @@ This project wouldn't be possible without help of:
 - [DSc Łukasz Machura](https://lukaszmachura.github.io/)
 - [PhD Paulina Trybek](https://www.researchgate.net/profile/Paulina-Trybek)
 
-And my dearest friend: [BEng Jakub Kraus](https://www.researchgate.net/profile/Paulina-Trybek).
+And my dearest friend: [(future BEng) Jakub Kraus](https://github.com/alkatraz445).
 
 ## License
 [GNU Public License](LICENSE)
 
 ## Project status
-Project is still in the works at this moment (*08.02.2025*).
+Project is still in the works at this moment (*09.02.2025*).
