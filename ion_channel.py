@@ -125,7 +125,7 @@ class IonChannel:
         """
         args = self.__random_force_params
         r = levy_stable.rvs(alpha=args['alpha'], beta=1.0 if self.__opened_state else -1.0, loc=0.0, scale=args['scale'], size=records, random_state=self.__generator)
-        return (self.__delta_t * self.__D) ** 0.5 * r  # random force
+        return (2 * self.__delta_t * self.__D) ** 0.5 * r  # random force
     
     def _generate_data(self, random_force='Gauss'):
         """Function, that generates time series of ion channel model and saves it to csv file.
@@ -233,8 +233,7 @@ class IonChannel:
         bins : int, optional
             Number of bins, by default 100.
         """
-        # fig, ax = plt.subplots()
-        # fig.suptitle("Histogram of generated data")
+        
         ax.hist(self.data_transposed[1], bins=bins)
         return fig, ax
 
