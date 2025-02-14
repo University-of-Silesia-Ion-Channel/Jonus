@@ -147,12 +147,12 @@ class IonChannel:
         # generating first state of ion channel (opened/closed)
         b = self.__generator.choice([self.__closed, self.__opened])
         tau = self.__generator.exponential(b[1])
-        self.dwell_times.append(tau)
+        self.dwell_times.append(tau)    
         self.__opened_state = b[0] == self.__opened[0]
         random_force_values = self.__random_force(np.int32(tau//self.__delta_t))
         
         x = np.array([b[0]], dtype=np.float32)
-        times = np.linspace(0, 5*0.0001, 50000, endpoint=False)
+        times = np.linspace(0, self.__records*self.__delta_t, self.__records, endpoint=False)
         self.data.append([times[0], x[0], b[0]])
         t += 1
         while t < self.__records:
@@ -216,7 +216,7 @@ class IonChannel:
         ax.set_title(title)
         ax.plot(self.data_transposed[0], self.data_transposed[1])
         if plot_breakpoints:
-            ax.vlines(x=self.breakpoints, ymin=np.min(self.data_transposed[1]), ymax=np.max(self.data_transposed[1]), color='red', linestyle='--')
+            ax.vlines(x=self.breakpoints, ymin=np.min(self.data_transposed[1]), ymax=np.max(self.data_transposed[1]), color='red', linestyle='--', alpha=0.6)
         ax.set_xlabel("Time [s]")
         ax.set_ylabel("Current [pA]")
         return fig, ax
@@ -389,6 +389,7 @@ class InteractiveIonChannel():
         )
         self.__fft_lags = IntSlider(min=30, max=200, step=10, value=100, description='FFT lags')
         self.__takes_previous = Checkbox(value=True, description='Takes previous values')
+        self.__draw_vlines_at_breakpoint = Checkbox(value=False, description='Draw breakpoints')
         self.__seed_select = IntSlider(min=0, max=99999, value=12345, step=1, description='Seed')
         self.__force_params_box = VBox()
 
@@ -435,7 +436,8 @@ class InteractiveIonChannel():
             self.__takes_previous,
             self.__random_force_dropdown,
             self.__autocorrelation_dropdown,
-            self.__fft_lags
+            self.__fft_lags,
+            self.__draw_vlines_at_breakpoint
         )
         run_button = Button(description="Run Model")
         run_button.on_click(self.__on_button_click)
@@ -456,7 +458,7 @@ class InteractiveIonChannel():
         """
         fig, axs = plt.subplots(2, 2, constrained_layout=True)
         fig.set_size_inches(16, 12)
-        self.ion_channel.plot_time_series(fig, axs[0][0])
+        self.ion_channel.plot_time_series(fig, axs[0][0], plot_breakpoints=self.__draw_vlines_at_breakpoint.value)
         self.ion_channel.plot_time_series_histogram(fig, axs[0][1])
         match self.__random_force_dropdown.value:
             case "Gauss":
