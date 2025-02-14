@@ -8,6 +8,8 @@ import os
 import numpy as np
 from ipywidgets import FloatSlider, IntSlider, Dropdown, SelectionSlider, VBox, Button, Checkbox
 from IPython.display import display
+from matplotlib import colors
+from matplotlib.ticker import PercentFormatter
 
 class IonChannel:
     """
@@ -234,7 +236,13 @@ class IonChannel:
             Number of bins, by default 100.
         """
         
-        ax.hist(self.data_transposed[1], bins=bins)
+        N, bins, patches = ax.hist(self.data_transposed[1], bins=bins)
+        fracs = N / N.max()
+        norm = colors.Normalize(fracs.min(), fracs.max())
+        for thisfrac, thispatch in zip(fracs, patches):
+            color = plt.cm.cividis(norm(thisfrac))
+            thispatch.set_facecolor(color)
+        
         return fig, ax
 
     def calculate_autocorrelation_acf(self, data, fig, ax, lags=100):
@@ -365,9 +373,9 @@ class InteractiveIonChannel():
         """
         self.__a_slider = FloatSlider(min=50.0, max=2000.0, step=0.1, value=100.0, description='a')
         self.__closed_0_slider = IntSlider(min=-50, max=50, step=1, value=-1, description='Closed value')
-        self.__closed_1_slider = FloatSlider(min=0.0, max=100.0, step=0.1, value=33.0, description='Closed avg time(scaled by delta_t)')
+        self.__closed_1_slider = FloatSlider(min=0.0, max=100.0, step=0.1, value=8.5, description='Closed avg time(scaled by delta_t)')
         self.__opened_0_slider = IntSlider(min=-50, max=50, step=1, value=1, description='Opened value')
-        self.__opened_1_slider = FloatSlider(min=0.0, max=100.0, step=0.1, value=11.0, description='Opened avg time(scaled by delta_t)')
+        self.__opened_1_slider = FloatSlider(min=0.0, max=100.0, step=0.1, value=3.0, description='Opened avg time(scaled by delta_t)')
         self.__D_slider = FloatSlider(min=0.01, max=100.0, step=0.01, value=10.00, description='D')
         self.__delta_t_slider = SelectionSlider(
             options=[10**-i for i in range(3, 6)],
@@ -410,7 +418,7 @@ class InteractiveIonChannel():
         if force_type.lower() == str.lower('Levy'):
             # Define widgets specific to 'Other Force'
             alpha = FloatSlider(min=1.5, max=1.99, step=0.01, value=1.9, description='alpha')
-            scale = FloatSlider(min=0, max=100, step=0.1, value=0.1, description='scale')
+            scale = FloatSlider(min=0, max=100, step=0.1, value=2, description='scale')
             self.__force_params_box.children = [alpha, scale]
         else:
             self.__force_params_box.children = []
