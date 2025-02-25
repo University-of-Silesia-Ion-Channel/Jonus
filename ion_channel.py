@@ -9,7 +9,6 @@ import numpy as np
 from ipywidgets import FloatSlider, IntSlider, Dropdown, SelectionSlider, VBox, Button, Checkbox
 from IPython.display import display
 from matplotlib import colors
-from matplotlib.ticker import PercentFormatter
 
 class IonChannel:
     """
@@ -74,7 +73,7 @@ class IonChannel:
         self.__takes_prev_vals = takes_prev_vals
         self.__random_force_params = random_force_params
         self.__generator = np.random.Generator(np.random.PCG64(seed=seed))
-        self.__threshold = 5.0
+        self.__threshold = 10.0
         self.data = []
         self.breakpoints = []
 
@@ -92,7 +91,7 @@ class IonChannel:
             Array with random force values.
         """
         
-        return (2 * self.__delta_t * self.__D) ** 0.5 * self.__generator.normal(0, 1, size=records)  # losowa siła
+        return (2 * self.__delta_t * self.__D) ** 0.5 * self.__generator.normal(0, 1, size=records)
     
     def __model_force_square(self, x, b):
         """Function calculates force value using square function.
@@ -110,8 +109,16 @@ class IonChannel:
             Force value at x.
         """
         return -self.__a*(x - b)
-       
-    # takes two common parameters and dictionary with 5 parameters needed for levy_stable.rvs function
+    
+    def __model_force_better(self, x, b):
+        k_val = 5
+        if self.__opened_larger:
+            k = k_val if self.__opened_state else -k_val
+        else:
+            k = -k_val if self.__opened_state else k_val
+        L = 50
+        return -self.__a * (x - b) * np.e**(k*np.tanh((x-b)/L))
+        
     def __random_force_levy(self, records):
         """Function generates random force values using ``levy_stable`` distribution.
 
@@ -126,7 +133,10 @@ class IonChannel:
             Array with random force values.
         """
         args = self.__random_force_params
-        r = levy_stable.rvs(alpha=args['alpha'], beta=1.0 if self.__opened_state else -1.0, loc=0.0, scale=args['scale'], size=records, random_state=self.__generator)
+        if self.__opened_larger:
+            r = levy_stable.rvs(alpha=args['alpha'], beta=-1.0 if self.__opened_state else 1.0, loc=0.0, scale=args['scale'], size=records, random_state=self.__generator)
+        else:
+            r = levy_stable.rvs(alpha=args['alpha'], beta=1.0 if self.__opened_state else -1.0, loc=0.0, scale=args['scale'], size=records, random_state=self.__generator)
         return (2 * self.__delta_t * self.__D) ** 0.5 * r  # random force
     
     def _generate_data(self, random_force='Gauss'):
@@ -150,6 +160,7 @@ class IonChannel:
         b = self.__generator.choice([self.__closed, self.__opened])
         tau = self.__generator.exponential(b[1])
         self.dwell_times.append(tau)    
+        self.__opened_larger = self.__opened[0] > self.__closed[0]
         self.__opened_state = b[0] == self.__opened[0]
         random_force_values = self.__random_force(np.int32(tau//self.__delta_t))
         
@@ -161,7 +172,7 @@ class IonChannel:
             count = 0
             new_x = (
                 self.__takes_prev_vals * x[t - 1] +
-                self.__model_force_square(x[t - 1], b[0]) * self.__delta_t +
+                self.__model_force_better(x[t - 1], b[0]) * self.__delta_t +
                 random_force_values[t - 1]
                 )
             while np.abs(new_x - b[0]) > self.__threshold and count < 100:
@@ -170,7 +181,7 @@ class IonChannel:
                 random_force_values[t - 1] = self.__random_force(1)[0]
                 new_x = (
                     self.__takes_prev_vals * x[t - 1] +
-                    self.__model_force_square(x[t - 1], b[0]) * self.__delta_t +
+                    self.__model_force_better(x[t - 1], b[0]) * self.__delta_t +
                     random_force_values[t - 1]
                     )
                 count += 1 
@@ -309,7 +320,7 @@ class IonChannel:
         n, F = pydfa.computeFlucVec(winSizes, revSeg=revSeg, polOrd=polOrd)
         max_limit = np.log(winSizes[-1])
         mid_point = winSizes[int(np.round(np.e**(max_limit//2), decimals=0))]
-        limits_list = np.array([[5, mid_point], [mid_point, winSizes[-1]]], dtype=int)
+        limits_list = np.array([[5, mid_point], [mid_point, winSizes[-1]], [5, winSizes[-1]]], dtype=int)
         list_H, list_H_intercept = pydfa.multiFitFlucVec(limits_list)
 
         clrs = ['k', 'b', 'm', 'c', 'y']
@@ -353,8 +364,8 @@ class IonChannel:
             transformation = fig.transFigure - fig.dpi_scale_trans
             fig.savefig(os.path.join(path_with_subfolder, 'sub_figure1.png'), bbox_inches=mtransforms.Bbox([[0, 0], [0.5, 0.495]]).transformed(transformation))
             fig.savefig(os.path.join(path_with_subfolder, 'sub_figure2.png'), bbox_inches=mtransforms.Bbox([[0.5, 0], [1.0, 0.5]]).transformed(transformation))
-            fig.savefig(os.path.join(path_with_subfolder, 'sub_figure3.png'), bbox_inches=mtransforms.Bbox([[0, 0.505], [0.5, 0.978]]).transformed(transformation))
-            fig.savefig(os.path.join(path_with_subfolder, 'sub_figure4.png'), bbox_inches=mtransforms.Bbox([[0.5, 0.5], [1, 0.978]]).transformed(transformation))
+            fig.savefig(os.path.join(path_with_subfolder, 'sub_figure3.png'), bbox_inches=mtransforms.Bbox([[0, 0.485], [0.5, 0.978]]).transformed(transformation))
+            fig.savefig(os.path.join(path_with_subfolder, 'sub_figure4.png'), bbox_inches=mtransforms.Bbox([[0.5, 0.485], [1, 0.978]]).transformed(transformation))
 
 class InteractiveIonChannel():
     """
@@ -371,11 +382,11 @@ class InteractiveIonChannel():
     def __init__(self):
         """Constructor of InteractiveIonChannel class
         """
-        self.__a_slider = FloatSlider(min=50.0, max=2000.0, step=0.1, value=100.0, description='a')
-        self.__closed_0_slider = IntSlider(min=-50, max=50, step=1, value=-1, description='Closed value')
-        self.__closed_1_slider = FloatSlider(min=0.0, max=100.0, step=0.1, value=8.5, description='Closed avg time(scaled by delta_t)')
-        self.__opened_0_slider = IntSlider(min=-50, max=50, step=1, value=1, description='Opened value')
-        self.__opened_1_slider = FloatSlider(min=0.0, max=100.0, step=0.1, value=3.0, description='Opened avg time(scaled by delta_t)')
+        self.__a_slider = FloatSlider(min=0.0, max=2000.0, step=1, value=100.0, description='a')
+        self.__closed_0_slider = IntSlider(min=-50, max=50, step=1, value=-38, description='Closed value')
+        self.__closed_1_slider = FloatSlider(min=0.0, max=100.0, step=0.1, value=3.0, description='Closed avg time(scaled by delta_t)')
+        self.__opened_0_slider = IntSlider(min=-50, max=50, step=1, value=-33, description='Opened value')
+        self.__opened_1_slider = FloatSlider(min=0.0, max=100.0, step=0.1, value=0.8, description='Opened avg time(scaled by delta_t)')
         self.__D_slider = FloatSlider(min=0.01, max=100.0, step=0.01, value=10.00, description='D')
         self.__delta_t_slider = SelectionSlider(
             options=[10**-i for i in range(3, 6)],
@@ -418,7 +429,7 @@ class InteractiveIonChannel():
         if force_type.lower() == str.lower('Levy'):
             # Define widgets specific to 'Other Force'
             alpha = FloatSlider(min=1.5, max=1.99, step=0.01, value=1.9, description='alpha')
-            scale = FloatSlider(min=0, max=100, step=0.1, value=2, description='scale')
+            scale = FloatSlider(min=0, max=100, step=0.1, value=1.5, description='scale')
             self.__force_params_box.children = [alpha, scale]
         else:
             self.__force_params_box.children = []
