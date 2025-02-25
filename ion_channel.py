@@ -31,7 +31,7 @@ class IonChannel:
         Generates Ion Channel time series data
     """
 
-    def __init__(self, a=100, closed=(-1, 48.0), opened=(1, 12.0), D=2.0, delta_t=0.0001, records=50000, takes_prev_vals=True, seed=12345, **random_force_params):
+    def __init__(self, a=100, k=1, L=1, closed=(-1, 48.0), opened=(1, 12.0), D=2.0, delta_t=0.0001, records=50000, takes_prev_vals=True, seed=12345, **random_force_params):
         """Constructor of ``IonChannel`` class
 
         Parameters
@@ -63,6 +63,8 @@ class IonChannel:
         """
         assert closed[1] > opened[1], "Closed state is on average open longer than opened."
         self.__a = a
+        self.__k = k
+        self.__L = L
         self.__closed = list(closed)
         self.__opened = list(opened)
         self.__closed[1] = self.__closed[1]*delta_t*100
@@ -110,14 +112,17 @@ class IonChannel:
         """
         return -self.__a*(x - b)
     
+    def __u(self, x, b):
+        return (x - b) / self.__L
+    
     def __model_force_better(self, x, b):
-        k_val = 5
+
         if self.__opened_larger:
-            k = k_val if self.__opened_state else -k_val
+            self.__k = self.__k if self.__opened_state else -self.__k
         else:
-            k = -k_val if self.__opened_state else k_val
-        L = 50
-        return -self.__a * (x - b) * np.e**(k*np.tanh((x-b)/L))
+            self.__k = -self.__k if self.__opened_state else self.__k
+        return -(self.__a*self.__L) * (self.__u(x, b) + self.__k * (self.__u(x, b)) ** (2)+self.__k ** (2) * (((self.__u(x, b)) ** (3)) / (2)))
+        # return -self.__a * (x - b) * np.e**(self.__k*np.tanh((x-b)/self.__L))
         
     def __random_force_levy(self, records):
         """Function generates random force values using ``levy_stable`` distribution.
@@ -383,11 +388,15 @@ class InteractiveIonChannel():
         """Constructor of InteractiveIonChannel class
         """
         self.__a_slider = FloatSlider(min=0.0, max=2000.0, step=1, value=100.0, description='a')
+
+        self.__k_slider = FloatSlider(min=-1.0, max=1.0, step=0.01, value=1.0, description='k')
+        self.__L_slider = FloatSlider(min=0.0, max=100.0, step=1.0, value=50.0, description='L')
+
         self.__closed_0_slider = IntSlider(min=-50, max=50, step=1, value=-38, description='Closed value')
         self.__closed_1_slider = FloatSlider(min=0.0, max=100.0, step=0.1, value=3.0, description='Closed avg time(scaled by delta_t)')
         self.__opened_0_slider = IntSlider(min=-50, max=50, step=1, value=-33, description='Opened value')
-        self.__opened_1_slider = FloatSlider(min=0.0, max=100.0, step=0.1, value=0.8, description='Opened avg time(scaled by delta_t)')
-        self.__D_slider = FloatSlider(min=0.01, max=100.0, step=0.01, value=10.00, description='D')
+        self.__opened_1_slider = FloatSlider(min=0.0, max=100.0, step=0.1, value=1.3, description='Opened avg time(scaled by delta_t)')
+        self.__D_slider = FloatSlider(min=0.01, max=100.0, step=0.01, value=5.00, description='D')
         self.__delta_t_slider = SelectionSlider(
             options=[10**-i for i in range(3, 6)],
             value=0.0001,
@@ -412,13 +421,13 @@ class InteractiveIonChannel():
         self.__seed_select = IntSlider(min=0, max=99999, value=12345, step=1, description='Seed')
         self.__force_params_box = VBox()
 
-    def __ion_channel_interactive(self, a, closed_0, closed_1, opened_0, opened_1, D, delta_t, records, random_force, takes_previous, seed, **force_params):
+    def __ion_channel_interactive(self, a, k, L, closed_0, closed_1, opened_0, opened_1, D, delta_t, records, random_force, takes_previous, seed, **force_params):
         """
         Generates an interactive widget for the ion channel model.
         """
         closed = (closed_0, closed_1)
         opened = (opened_0, opened_1)
-        self.ion_channel = IonChannel(a, closed, opened, D, delta_t, records, takes_prev_vals=takes_previous, seed=seed, **force_params)
+        self.ion_channel = IonChannel(a, k, L, closed, opened, D, delta_t, records, takes_prev_vals=takes_previous, seed=seed, **force_params)
         self.ion_channel._generate_data(random_force)
     
     def __update_force_params(self, *args):
@@ -444,6 +453,8 @@ class InteractiveIonChannel():
         display(
             self.__seed_select,
             self.__a_slider,
+            self.__k_slider,
+            self.__L_slider,
             self.__closed_0_slider,
             self.__closed_1_slider,
             self.__opened_0_slider,
@@ -511,6 +522,8 @@ class InteractiveIonChannel():
         if (b.description == 'Run Model'):
             self.__ion_channel_interactive(
                 self.__a_slider.value,
+                self.__k_slider.value,
+                self.__L_slider.value,
                 self.__closed_0_slider.value,
                 self.__closed_1_slider.value,
                 self.__opened_0_slider.value,
@@ -532,6 +545,8 @@ class InteractiveIonChannel():
             for ind, D in enumerate(D_list):
                 self.__ion_channel_interactive(
                     self.__a_slider.value,
+                    self.__k_slider.value,
+                    self.__L_slider.value,
                     self.__closed_0_slider.value,
                     self.__closed_1_slider.value,
                     self.__opened_0_slider.value,
