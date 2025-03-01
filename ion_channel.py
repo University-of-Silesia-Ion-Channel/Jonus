@@ -115,14 +115,21 @@ class IonChannel:
     def __u(self, x, b):
         return (x - b) / self.__L
     
-    def __model_force_better(self, x, b):
+    def __model_force_asymetrical(self, x, b):
 
         if self.__opened_larger:
-            self.__k = self.__k if self.__opened_state else -self.__k
-        else:
             self.__k = -self.__k if self.__opened_state else self.__k
-        return -(self.__a*self.__L) * (self.__u(x, b) + self.__k * (self.__u(x, b)) ** (2)+self.__k ** (2) * (((self.__u(x, b)) ** (3)) / (2)))
-        # return -self.__a * (x - b) * np.e**(self.__k*np.tanh((x-b)/self.__L))
+        else:
+            self.__k = self.__k if self.__opened_state else -self.__k
+        u_x = self.__u(x, b)
+        return -(self.__a*self.__L) * (u_x + self.__k * (u_x) ** 2 + (self.__k ** 2 * (u_x) ** 3) / 2 - (self.__k * u_x **4) / 3)
+
+    def __model_force_e(self, x, b):
+        if self.__opened_larger:
+            k = -self.__k if self.__opened_state else self.__k
+        else:
+            k = self.__k if self.__opened_state else -self.__k
+        return self.__model_force_square * np.e ** (self.__k * np.tanh((x - b) / self.__L))
         
     def __random_force_levy(self, records):
         """Function generates random force values using ``levy_stable`` distribution.
@@ -177,7 +184,7 @@ class IonChannel:
             count = 0
             new_x = (
                 self.__takes_prev_vals * x[t - 1] +
-                self.__model_force_better(x[t - 1], b[0]) * self.__delta_t +
+                self.__model_force_asymetrical(x[t - 1], b[0]) * self.__delta_t +
                 random_force_values[t - 1]
                 )
             while np.abs(new_x - b[0]) > self.__threshold and count < 100:
@@ -186,7 +193,7 @@ class IonChannel:
                 random_force_values[t - 1] = self.__random_force(1)[0]
                 new_x = (
                     self.__takes_prev_vals * x[t - 1] +
-                    self.__model_force_better(x[t - 1], b[0]) * self.__delta_t +
+                    self.__model_force_asymetrical(x[t - 1], b[0]) * self.__delta_t +
                     random_force_values[t - 1]
                     )
                 count += 1 
