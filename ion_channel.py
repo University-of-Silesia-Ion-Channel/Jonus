@@ -240,16 +240,14 @@ class IonChannel:
         self.data = np.array(self.data)
         self.breakpoints = np.array(self.breakpoints)        
         self.data_transposed = self.data.T
-        save_file = os.path.join(os.getcwd(), 'outputs', f'data_{random_force}_{self.__D}_{self.__delta_t}_{list(self.__random_force_params.values()) if isinstance(self.__random_force_params, dict) else '_'}.csv')
+        save_file = os.path.join(os.getcwd(), 'outputs', f'data_{random_force}_a{self.__a}_{self.__D}_o{self.__opened[0]}_c{self.__closed[0]}_{self.__delta_t}_{list(self.__random_force_params.values()) if isinstance(self.__random_force_params, dict) else '_'}.csv')
         np.savetxt(save_file, self.data, delimiter=',', header='time,position,state', fmt=['%e', '%e', '%d'])
 
-    def plot_time_series(self, fig, ax : plt.Axes, title='Generated model', plot_breakpoints=False):
+    def plot_time_series(self, ax : plt.Axes, title='Generated model', plot_breakpoints=False):
         """Plots generated time series.
 
         Parameters
         ----------
-        fig : matplotlib.pyplot.Figure
-            Figure on which time series is plotted.
         ax : matplotlib.pyplot.Axes
             Subplot ax to put plot into.
         title : str, optional
@@ -265,20 +263,27 @@ class IonChannel:
         assert len(self.data_transposed) > 0, "Data wasn't generated"
         ax.set_title(title)
         ax.plot(self.data_transposed[0], self.data_transposed[1])
+        # used only for zoomed in plot - maybe should be in an if statement
+        sub_fig, sub_ax = plt.subplots()
+        sub_fig.set_size_inches(12, 6)
+        sub_fig.suptitle('Zoomed time series')
+        sub_fig.tight_layout()
+        sub_ax.set_xlabel("Time [s]")
+        sub_ax.set_ylabel("Current [pA]")
+        sub_ax.plot(self.data_transposed[0][:5000], self.data_transposed[1][:5000])
+
         if plot_breakpoints:
             ax.vlines(x=self.breakpoints, ymin=np.min(self.data_transposed[1]), ymax=np.max(self.data_transposed[1]), color='red', linestyle='--', alpha=0.6)
         ax.set_xlabel("Time [s]")
         ax.set_ylabel("Current [pA]")
-        return fig, ax
+        return sub_fig
 
     
-    def plot_time_series_histogram(self, fig, ax, bins=100):
+    def plot_time_series_histogram(self, ax, bins=100):
         """Plots histogram of time series with specified amount of ``bins``.
 
         Parameters
         ----------
-        fig : matplotlib.pyplot.Figure
-            Figure on which time series histogram is plotted.
         ax : matplotlib.pyplot.Axes
             Subplot ax to put plot into.
         bins : int, optional
@@ -293,8 +298,8 @@ class IonChannel:
         for thisfrac, thispatch in zip(fracs, patches):
             color = plt.cm.cividis(norm(thisfrac))
             thispatch.set_facecolor(color)
+        ax.set_title('Histogram of time series')
         
-        return fig, ax
 
     def calculate_autocorrelation_acf(self, data, fig, ax, lags=100):
         """Function calculates and plots autocorrelation function.
@@ -428,9 +433,9 @@ class InteractiveIonChannel():
         self.__L_slider = FloatSlider(min=0.0, max=100.0, step=1.0, value=50.0, description='L')
 
         self.__closed_0_slider = IntSlider(min=-50, max=50, step=1, value=-38, description='Closed value')
-        self.__closed_1_slider = FloatSlider(min=0.0, max=100.0, step=0.1, value=9.0, description='Closed avg time(scaled by delta_t)')
+        self.__closed_1_slider = FloatSlider(min=0.0, max=100.0, step=0.1, value=27.0, description='Closed avg time(scaled by delta_t)')
         self.__opened_0_slider = IntSlider(min=-50, max=50, step=1, value=-34, description='Opened value')
-        self.__opened_1_slider = FloatSlider(min=0.0, max=100.0, step=0.1, value=2.0, description='Opened avg time(scaled by delta_t)')
+        self.__opened_1_slider = FloatSlider(min=0.0, max=100.0, step=0.1, value=5.0, description='Opened avg time(scaled by delta_t)')
         self.__D_slider = FloatSlider(min=0.00, max=1000.0, step=0.1, value=100.0, description='D')
         self.__delta_t_slider = SelectionSlider(
             options=[10**-i for i in range(3, 6)],
@@ -532,8 +537,8 @@ class InteractiveIonChannel():
         """
         fig, axs = plt.subplots(2, 2, constrained_layout=True)
         fig.set_size_inches(16, 12)
-        self.ion_channel.plot_time_series(fig, axs[0][0], plot_breakpoints=self.__draw_vlines_at_breakpoint.value)
-        self.ion_channel.plot_time_series_histogram(fig, axs[0][1])
+        sub_fig = self.ion_channel.plot_time_series(axs[0][0], plot_breakpoints=self.__draw_vlines_at_breakpoint.value)
+        self.ion_channel.plot_time_series_histogram(axs[0][1])
         match self.__random_force_dropdown.value:
             case "Gauss":
                 name = f"{self.__random_force_dropdown.value}_D{D}_a{self.__a_slider.value}_k{self.__k_slider.value}_L{self.__L_slider.value}_{self.__seed_select.value}"
@@ -551,6 +556,7 @@ class InteractiveIonChannel():
                 fig, axs[1][1] = self.ion_channel.calculate_autocorrelation_dfa(data, fig, axs[1][1])
 
         self.ion_channel.save_figure(fig, title=name)
+        self.ion_channel.save_figure(sub_fig, title=name, name='zoomed_time_series', with_subfigures=False)
 
     def __multi_on_click_event(self, index):
         data = self.ion_channel.data_transposed[1]
