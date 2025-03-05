@@ -24,20 +24,24 @@ class IonChannel:
         Holds transposed ``data``.
     breakpoints : ndarray
         Holds points at which Ion Channel changed state.
+    dwell_times : ndarray
+        Holds dwell times of Ion Channel. These times are the time the Ion Channel stayed in one state.
 
     Methods
     -------
-    generate_data(random_force='Gauss'):
+    _generate_data(random_force='Gauss'):
         Generates Ion Channel time series data
     """
 
-    def __init__(self, a=100, k=1, L=1, closed=(-1, 48.0), opened=(1, 12.0), D=2.0, delta_t=0.0001, records=50000, takes_prev_vals=True, seed=12345, **random_force_params):
+    def __init__(self, a=100.0, k=1.0, closed=(-1, 48.0), opened=(1, 12.0), D=2.0, delta_t=0.0001, records=50000, takes_prev_vals=True, seed=12345, **random_force_params):
         """Constructor of ``IonChannel`` class
 
         Parameters
         ----------
-        a : int, optional
+        a : float, optional
             a coefficient used in ``__model_force_square``, by default 100
+        k : float, optional
+            k coefficient used in ``__model_force_asymetrical``, by default 1.0
         closed : tuple, optional
             ``closed[0]`` has value of current in [pA] of when channel is closed.
 
@@ -56,15 +60,11 @@ class IonChannel:
             Was used for testing. Keep at ``True``, by default True
         seed : int, optional
             Used for seeded generation. Creates ``np.random.Generator(np.random.PCG64(seed=seed))``, by default 12345
-
-        Notes
-        -----
-        ``closed[1]`` > ``opened[1]``
+        random_force_params : dict, optional
+            Parameters for Levy distribution, by default {}.
         """
-        # assert closed[1] > opened[1], "Closed state is on average open longer than opened."
         self.__a = a
         self.__k = k
-        self.__L = L
         self.__closed = list(closed)
         self.__opened = list(opened)
         self.__closed[1] = self.__closed[1]*delta_t*100
@@ -103,7 +103,7 @@ class IonChannel:
         x : float 
             Position value.
         b : float 
-            Coefficient.
+            State of the ion channel.
 
         Returns
         -------
@@ -111,26 +111,22 @@ class IonChannel:
             Force value at x.
         """
         return -self.__a*(x - b)
-    
-    def __u(self, x, b):
-        return (x - b) / self.__L
-    
+
     def __model_force_asymetrical(self, x, b):
-        if self.__opened_larger:
-            self.__k = self.__k if self.__opened_state else -self.__k
-        else:
-            self.__k = -self.__k if self.__opened_state else self.__k
-        u_x = self.__u(x, b)
-        return -(self.__a*self.__L) * (u_x + self.__k * (u_x) ** 2 + (self.__k ** 2 * (u_x) ** 3) / 2 - (self.__k * u_x **4) / 3)
+        """Function calculates force value with asymetrical potential.
 
-    def __model_force_e(self, x, b):
-        if self.__opened_larger:
-            k = self.__k if self.__opened_state else -self.__k
-        else:
-            k = -self.__k if self.__opened_state else self.__k
-        return self.__model_force_square * np.e ** (self.__k * np.tanh((x - b) / self.__L))
+        Parameters
+        ----------
+        x : float
+            Position value.
+        b : float
+            State of the ion channel.            
 
-    def __model_force_a(self, x, b):
+        Returns
+        -------
+        float
+            Float value at x.
+        """
         if self.__opened_larger:
             k = self.__k if self.__opened_state else (-self.__k)
         else:
@@ -162,6 +158,10 @@ class IonChannel:
 
         Parameters
         ----------
+        model_force : str
+            Choice of model function.
+                - ``Square`` for ``__model_force_square``
+                - `asymetrical` for ``__model_force_asymetrical``
         random_force : str
             Choice of noise random function. 
                 - ``Gauss`` for ``__random_force_gauss``
@@ -177,10 +177,6 @@ class IonChannel:
                 self.__model_force = self.__model_force_square
             case "asymetrical":
                 self.__model_force = self.__model_force_asymetrical
-            case "e":
-                self.__model_force = self.__model_force_e
-            case "a":
-                self.__model_force = self.__model_force_a
         t = 0
         self.dwell_times = []
         # generating first state of ion channel (opened/closed)
@@ -206,7 +202,7 @@ class IonChannel:
                 random_force_values[t - 1]
                 )
             while np.abs(new_x - b[0]) > self.__threshold and count < 100:
-                # generate a new smaller x
+                # generate a new smaller x if new_x is too far from b[0]
                 prev_x = x[t - 1] if self.__no_state_change else b[0]
                 self.__opened_state = b[0] == self.__opened[0]
                 random_force_values[t - 1] = self.__random_force(1)[0]
@@ -216,8 +212,9 @@ class IonChannel:
                     random_force_values[t - 1]
                     )
                 count += 1 
-
-            # for more acute changes
+            # if unable to generate a smaller x in 100 iterations, use b[0]
+            if count == 100:
+                new_x = b[0]    
             self.__no_state_change = True
 
             x = np.append(x, new_x)
@@ -240,10 +237,10 @@ class IonChannel:
         self.data = np.array(self.data)
         self.breakpoints = np.array(self.breakpoints)        
         self.data_transposed = self.data.T
-        save_file = os.path.join(os.getcwd(), 'outputs', f'data_{random_force}_a{self.__a}_{self.__D}_o{self.__opened[0]}_c{self.__closed[0]}_{self.__delta_t}_{list(self.__random_force_params.values()) if isinstance(self.__random_force_params, dict) else '_'}.csv')
+        save_file = os.path.join(os.getcwd(), 'outputs', f'data_{random_force}_a{self.__a}_D{self.__D}_o{self.__opened[0]}_c{self.__closed[0]}_delta_t{self.__delta_t}_{list(self.__random_force_params.values()) if isinstance(self.__random_force_params, dict) else '_'}.csv')
         np.savetxt(save_file, self.data, delimiter=',', header='time,position,state', fmt=['%e', '%e', '%d'])
 
-    def plot_time_series(self, ax : plt.Axes, title='Generated model', plot_breakpoints=False):
+    def plot_time_series(self, ax : plt.Axes, title='Generated model', plot_breakpoints=False, plot_zoomed=False):
         """Plots generated time series.
 
         Parameters
@@ -254,28 +251,38 @@ class IonChannel:
             Title of plot, by default 'Generated model'
         plot_breakpoints : bool
             True if lines on breakpoints should be plotted, by default False.
+        plot_zoomed : bool
+            True if zoomed in plot should be plotted, by default False.
         
         Raises
         ------
         AssertionError
             With message "Data wasn't generated"
+
+        Returns
+        -------
+        matplotlib.pyplot.Figure
+            Subplot with zoomed. None if ``plot_zoomed`` is False.
         """
         assert len(self.data_transposed) > 0, "Data wasn't generated"
         ax.set_title(title)
         ax.plot(self.data_transposed[0], self.data_transposed[1])
-        # used only for zoomed in plot - maybe should be in an if statement
-        sub_fig, sub_ax = plt.subplots()
-        sub_fig.set_size_inches(12, 6)
-        sub_fig.suptitle('Zoomed time series')
-        sub_fig.tight_layout()
-        sub_ax.set_xlabel("Time [s]")
-        sub_ax.set_ylabel("Current [pA]")
-        sub_ax.plot(self.data_transposed[0][:5000], self.data_transposed[1][:5000])
-
         if plot_breakpoints:
             ax.vlines(x=self.breakpoints, ymin=np.min(self.data_transposed[1]), ymax=np.max(self.data_transposed[1]), color='red', linestyle='--', alpha=0.6)
         ax.set_xlabel("Time [s]")
         ax.set_ylabel("Current [pA]")
+
+        if plot_zoomed:
+            sub_fig, sub_ax = plt.subplots()
+            sub_fig.set_size_inches(12, 6)
+            sub_fig.suptitle('Zoomed time series')
+            sub_fig.tight_layout()
+            sub_ax.set_xlabel("Time [s]")
+            sub_ax.set_ylabel("Current [pA]")
+            sub_ax.plot(self.data_transposed[0][:5000], self.data_transposed[1][:5000])
+        else:
+            sub_fig = None
+        
         return sub_fig
 
     
@@ -289,9 +296,6 @@ class IonChannel:
         bins : int, optional
             Number of bins, by default 100.
         """
-        # filtered_data = self.data_transposed[1][~is_outlier(self.data_transposed[1], thresh=self.__threshold)] 
-        # min, max = np.min(self.data_transposed[1]), np.max(self.data_transposed[1])
-        # x_minmax = -1 + (2 * (self.data_transposed[1] - min) / (max - min))
         N, bins, patches = ax.hist(self.data_transposed[1], bins=bins)
         fracs = N / N.max()
         norm = colors.Normalize(fracs.min(), fracs.max())
@@ -430,7 +434,6 @@ class InteractiveIonChannel():
         self.__a_slider = FloatSlider(min=0.0, max=5000.0, step=1, value=1000.0, description='a')
 
         self.__k_slider = FloatSlider(min=-10.0, max=10.0, step=0.01, value=1.0, description='k')
-        self.__L_slider = FloatSlider(min=0.0, max=100.0, step=1.0, value=50.0, description='L')
 
         self.__closed_0_slider = IntSlider(min=-50, max=50, step=1, value=-38, description='Closed value')
         self.__closed_1_slider = FloatSlider(min=0.0, max=100.0, step=0.1, value=27.0, description='Closed avg time(scaled by delta_t)')
@@ -468,13 +471,13 @@ class InteractiveIonChannel():
         self.__seed_select = IntSlider(min=0, max=99999, value=12345, step=1, description='Seed')
         self.__force_params_box = VBox()
 
-    def __ion_channel_interactive(self, a, k, L, closed_0, closed_1, opened_0, opened_1, D, delta_t, records, random_force, model_force, takes_previous, seed, **force_params):
+    def __ion_channel_interactive(self, a, k, closed_0, closed_1, opened_0, opened_1, D, delta_t, records, random_force, model_force, takes_previous, seed, **force_params):
         """
         Generates an interactive widget for the ion channel model.
         """
         closed = (closed_0, closed_1)
         opened = (opened_0, opened_1)
-        self.ion_channel = IonChannel(a, k, L, closed, opened, D, delta_t, records, takes_prev_vals=takes_previous, seed=seed, **force_params)
+        self.ion_channel = IonChannel(a, k, closed, opened, D, delta_t, records, takes_prev_vals=takes_previous, seed=seed, **force_params)
         self.ion_channel._generate_data(model_force, random_force)
     
     def __update_force_params(self, *args):
@@ -502,7 +505,6 @@ class InteractiveIonChannel():
             self.__seed_select,
             self.__a_slider,
             self.__k_slider,
-            self.__L_slider,
             self.__closed_0_slider,
             self.__closed_1_slider,
             self.__opened_0_slider,
@@ -537,13 +539,13 @@ class InteractiveIonChannel():
         """
         fig, axs = plt.subplots(2, 2, constrained_layout=True)
         fig.set_size_inches(16, 12)
-        sub_fig = self.ion_channel.plot_time_series(axs[0][0], plot_breakpoints=self.__draw_vlines_at_breakpoint.value)
+        sub_fig = self.ion_channel.plot_time_series(axs[0][0], plot_breakpoints=self.__draw_vlines_at_breakpoint.value, plot_zoomed=True)
         self.ion_channel.plot_time_series_histogram(axs[0][1])
         match self.__random_force_dropdown.value:
             case "Gauss":
-                name = f"{self.__random_force_dropdown.value}_D{D}_a{self.__a_slider.value}_k{self.__k_slider.value}_L{self.__L_slider.value}_{self.__seed_select.value}"
+                name = f"{self.__random_force_dropdown.value}_D{D}_a{self.__a_slider.value}_k{self.__k_slider.value}_{self.__seed_select.value}"
             case "Levy":
-                name = f"{self.__random_force_dropdown.value}_D{D}_a{self.__a_slider.value}_k{self.__k_slider.value}_L{self.__L_slider.value}_alpha{self.force_params["alpha"]}_scale{self.force_params["scale"]}_{self.__seed_select.value}"
+                name = f"{self.__random_force_dropdown.value}_D{D}_a{self.__a_slider.value}_k{self.__k_slider.value}_alpha{self.force_params["alpha"]}_scale{self.force_params["scale"]}_{self.__seed_select.value}"
         data = self.ion_channel.data_transposed[1] # because self.data is shape (records, 3)
         fig.suptitle(name)
         match self.__autocorrelation_dropdown.value:
@@ -573,7 +575,6 @@ class InteractiveIonChannel():
             self.__ion_channel_interactive(
                 self.__a_slider.value,
                 self.__k_slider.value,
-                self.__L_slider.value,
                 self.__closed_0_slider.value,
                 self.__closed_1_slider.value,
                 self.__opened_0_slider.value,
@@ -597,7 +598,6 @@ class InteractiveIonChannel():
                 self.__ion_channel_interactive(
                     self.__a_slider.value,
                     self.__k_slider.value,
-                    self.__L_slider.value,
                     self.__closed_0_slider.value,
                     self.__closed_1_slider.value,
                     self.__opened_0_slider.value,
