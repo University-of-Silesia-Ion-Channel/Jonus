@@ -1,3 +1,4 @@
+from email import generator
 import stat
 import matplotlib.pyplot as plt
 import matplotlib.transforms as mtransforms
@@ -131,7 +132,8 @@ class IonChannel:
         ndarray : 
             Array with random force values.
         """
-        
+        if records == 0:
+            records = 2
         return self.__D ** 0.5 * (2 * self.__delta_t) ** 0.5 * self.__generator2.normal(0, 1, size=records)
     
     def __random_force_levy(self, records):
@@ -147,6 +149,8 @@ class IonChannel:
         ndarray: 
             Array with random force values.
         """
+        if records == 0:
+            records = 2
         args = self.__force_params
         if self._opened_larger:
             r = levy_stable.rvs(alpha=args['alpha'], beta=args['beta'] if self.__opened_state else -args['beta'], loc=0.0, scale=args['scale'], size=records, random_state=self.__generator2)
@@ -318,7 +322,6 @@ class IonChannel:
         while t < self.__records:
             new_x = (
                 self.__takes_prev_vals * x[t - 1] +
-                # self.__model_force(x[t - 1], b[0]) * self.__delta_t +
                 self.__model_force(x[t - 1], b[0]) * self.__delta_t +
                 random_force_values[t]
                 )
@@ -327,7 +330,6 @@ class IonChannel:
             t += 1
             tau -= self.__delta_t
             if(tau - self.__delta_t < self.__delta_t):
-                # print("Wow breakpoint")
                 self.breakpoints.append(times[t-1])
                 self.__opened_state = b[0] == self.__opened[0]
                 if self.__opened_state:
@@ -342,8 +344,8 @@ class IonChannel:
         self.data = np.array(self.data)
         self.breakpoints = np.array(self.breakpoints)        
         self.data_transposed = self.data.T
-        save_file = os.path.join(os.getcwd(), 'outputs', f'data_{random_force}_a{self.__a}_D{self.__D}_o{self.__opened[0]}_c{self.__closed[0]}_delta_t{self.__delta_t}_{list(self.__force_params.values()) if isinstance(self.__force_params, dict) else '_'}.csv')
-        np.savetxt(save_file, self.data, delimiter=',', header='time,position,state', fmt=['%e', '%e', '%d'])
+        # save_file = os.path.join(os.getcwd(), 'outputs', f'data_{random_force}_a{self.__a}_D{self.__D}_o{self.__opened[0]}_c{self.__closed[0]}_delta_t{self.__delta_t}_{list(self.__force_params.values()) if isinstance(self.__force_params, dict) else '_'}.csv')
+        # np.savetxt(save_file, self.data, delimiter=',', header='time,position,state', fmt=['%e', '%e', '%d'])
 
     def __calculate_ranges(self):
         """Calculates ranges of data.
@@ -772,6 +774,7 @@ class InteractiveIonChannel():
         alpha_low = 0
         alpha_high = 0
         alpha_all = 0
+        generator = np.random.Generator(np.random.PCG64(seed=seed))
         for _ in range(nr_of_tests):
             ion_channel = IonChannel(
                 a=a_slider_value,
@@ -781,7 +784,7 @@ class InteractiveIonChannel():
                 delta_t=delta_t_slider_value,
                 records=records_slider_value,
                 takes_prev_vals=takes_previous_value,
-                seed=seed,
+                seed=int(generator.random()*100000),
                 **force_params
             )
             ion_channel._generate_data(force_dropdown_value, random_force_dropdown_value)
@@ -804,18 +807,19 @@ class InteractiveIonChannel():
             alpha_low = 0
             alpha_high = 0
             alpha_all = 0
-            self.generator = np.random.Generator(np.random.PCG64(seed=self.__seed_select.value))
-            nr_of_tests = 108
             core_count = multiprocessing.cpu_count()
+            nr_of_tests = 128
             batch_for_core = nr_of_tests // core_count
-            noise_dict = dict([])
             D_list = [10.0, 50.0, 100.0, 500.0]
-            for noise in ["Gauss", "Levy"]:
+            for noise in ["Levy","Gauss"]:
+                noise_dict = dict([])
+                self.generator = np.random.Generator(np.random.PCG64(seed=self.__seed_select.value))
                 self.__random_force_dropdown.value = noise
                 for D in D_list:
                     alpha_dict = dict([])
                     args_list = [
-                        (D, batch_for_core, self.__seed_select.value, self.__force_params, self.__force_dropdown.value, self.__random_force_dropdown.value, self.__delta_t_slider.value, self.__records_slider.value, self.__takes_previous.value, (self.__closed_0_slider.value, self.__closed_1_slider.value), (self.__opened_0_slider.value, self.__opened_1_slider.value), self.__a_slider.value)
+                        (D, batch_for_core, int(self.generator.random()*10000), self.__force_params, self.__force_dropdown.value, self.__random_force_dropdown.value, self.__delta_t_slider.value, self.__records_slider.value, self.__takes_previous.value, (self.__closed_0_slider.value, self.__closed_1_slider.value), (self.__opened_0_slider.value, self.__opened_1_slider.value), self.__a_slider.value)
+                        for _ in range(core_count)
                     ]
                     with multiprocessing.Pool(core_count) as p:
                         results = p.map(self.multiprocessed_worker, args_list)
@@ -828,8 +832,8 @@ class InteractiveIonChannel():
                     alpha_all /= nr_of_tests
                     alpha_dict[D] = [alpha_low, alpha_high, alpha_all]
                 noise_dict[noise] = alpha_dict
-            with open('alpha.csv', 'w') as f:
-                f.write('Noise,D,alpha_low,alpha_high,alpha_all\n')
-                for noise, alpha_dict in noise_dict.items():
-                    for D, alphas in alpha_dict.items():
-                        f.write(f'{noise},{D},{alphas[0]},{alphas[1]},{alphas[2]}\n')
+                with open('alpha.csv', 'a') as f:
+                    # f.write('Noise,D,alpha_low,alpha_high,alpha_all\n')
+                    for noise, alpha_dict in noise_dict.items():
+                        for D, alphas in alpha_dict.items():
+                            f.write(f'{noise}, {D}, {alphas[0]}, {alphas[1]}, {alphas[2]}\n')
