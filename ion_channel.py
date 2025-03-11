@@ -13,6 +13,7 @@ import numpy as np
 from ipywidgets import FloatSlider, IntSlider, Dropdown, SelectionSlider, VBox, Button, Checkbox
 from IPython.display import display
 from matplotlib import colors
+import cupy as cp
 
 import multiprocessing
 
@@ -494,7 +495,7 @@ class IonChannel:
     def dfa(self, data):
         a = fu.toAggregated(data)
         pydfa = fathon.DFA(a)
-        winSizes = fu.linRangeByStep(5, len(a), step=5)
+        winSizes = np.arange(5, np.size(a) + 1, 5, dtype=np.int64)
         
         revSeg = True
         polOrd = 3
@@ -506,6 +507,20 @@ class IonChannel:
         list_alpha, list_alpha_intercept = pydfa.multiFitFlucVec(limits_list)
 
         return n, F, list_alpha, list_alpha_intercept, limits_list
+
+    def gpu_dfa(self, data):
+        data = cp.array(data)
+        # zagregowanie danych tak, że jest to kumulatwyna suma różnicy między wartościami a średnią
+        mean = cp.mean(data)
+        a = cp.cumsum(data - mean)
+
+        winSizes = np.arange(5, cp.size(a) + 1, 5, dtype=np.int64)
+        
+        polOrd = 1
+        for n in winSizes:
+            # podziel a na sekwencje o długości n
+
+
 
     def plot_autocorrelation_dfa(self, data, fig, ax, stationarity=False):
         """
