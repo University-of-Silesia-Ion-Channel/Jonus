@@ -1,5 +1,3 @@
-from email import generator
-import stat
 import matplotlib.pyplot as plt
 import matplotlib.transforms as mtransforms
 from scipy.fft import next_fast_len
@@ -13,7 +11,7 @@ import numpy as np
 from ipywidgets import FloatSlider, IntSlider, Dropdown, SelectionSlider, VBox, Button, Checkbox
 from IPython.display import display
 from matplotlib import colors
-import cupy as cp
+import pickle
 
 import multiprocessing
 
@@ -59,25 +57,25 @@ class IonChannel:
 
     Methods
     -------
-    _generate_data(random_force='Gauss'):
+    _generate_data(model_force='Levy', random_force='Gauss'):
         Generates Ion Channel time series data
     """
 
-    def __init__(self, a=1000.0, closed=(-38.0, 40.0), opened=(-34.0, 15.0), D=100.0, delta_t=0.0001, records=50000, takes_prev_vals=True, seed=12345, **force_params):
+    def __init__(self, a=1000.0, closed=(-38.0, 10.0), opened=(-34.0, 2.0), D=100.0, delta_t=0.0001, records=50000, takes_prev_vals=True, seed=12345, pol_ord = 1, **force_params):
         """Constructor of ``IonChannel`` class
 
         Parameters
         ----------
         a : float, optional
-            a coefficient used in ``__model_force_square``, by default 100
+            a coefficient used in ``__model_force``, by default 1000.0
         closed : tuple, optional
             ``closed[0]`` has value of current in [pA] of when channel is closed.
 
-            ``closed[1]`` has value of average time the channel is closed. By default (-1, 48.0)
+            ``closed[1]`` has value of average time the channel is closed. By default (-38, 10.0)
         opened : tuple, optional
             ``opened[0]`` has value of current in [pA] of when channel is opened.
             
-            ``opened[1]`` has value of average time the channel is opened. By default (1, 12.0)
+            ``opened[1]`` has value of average time the channel is opened. By default (-34, 2.0)
         D : float, str, optional
             String representing how strong is the noise. Values are:
             - ``VL`` for very low noise. Data is easily readable.
@@ -94,6 +92,8 @@ class IonChannel:
             Was used for testing. Keep at ``True``, by default True
         seed : int, optional
             Used for seeded generation. Creates ``np.random.Generator(np.random.PCG64(seed=seed))``, by default 12345
+        pol_ord : int, optional
+            Used in ``dfa`` method. Represents power of a polynomial, by default 1.
         force_params : dict, optional
             Parameters for Levy distribution and for asymetrical model force, by default {}.
         """
@@ -102,7 +102,7 @@ class IonChannel:
         self.__opened = list(opened)
         self.__closed[1] = self.__closed[1]*delta_t*100
         self.__opened[1] = self.__opened[1]*delta_t*100
-        self.__LUT_D = {'VL' : 50.0, 'L' : 100.0, 'M' : 200.0, 'H' : 1000.0}
+        self.__LUT_D = {'VL' : 10.0, 'L' : 50.0, 'M' : 100.0, 'H' : 500.0}
         if isinstance(D, float):
             self.__D = D
         else:
@@ -111,12 +111,15 @@ class IonChannel:
         self.__delta_t = delta_t
         self.__records = records
         self.__takes_prev_vals = takes_prev_vals
-        self.__force_params = force_params
+        if len(force_params) == 0:
+            self.__force_params = {'alpha':1.9, 'beta':0.9, 'scale':1.5}
+        else:
+            self.__force_params = force_params
         # generator for state and how long its in the state
         self.__generator1 = np.random.Generator(np.random.PCG64(seed=seed))
         # generator for random force
         self.__generator2 = np.random.Generator(np.random.PCG64(seed=seed))
-        
+        self._pol_ord = pol_ord
         self.data = []
         self.breakpoints = []
 
@@ -225,6 +228,8 @@ class IonChannel:
     #         return self.__a
 
     def __model_force_piecewise_simple(self, x, b):
+        """Function calculates force value with simple piecewise potential.
+        """
         if np.abs(x-b) < 0.1:
             return 0.0
         if self._opened_larger:
@@ -263,55 +268,53 @@ class IonChannel:
                     return self.__model_force_square(x, self.__closed[0] - 1)
                 if x < self.__opened[0]:
                     return self.__model_force_square(x, self.__opened[0] + 1)
-
-    # def __transition(self, b1, b2, t, T):
-    #     return b1 + (b2 - b1) * t / T
-
-    # def __model_force_smooth(self, x, t, T, previous_state, desired_state):
-    #     """Function calculates force value with smooth transition.
-    #     """
-    #     b = self.__transition(previous_state, desired_state, t, T)
-    #     print("x", x)
-    #     print("b", b)
-    #     print(self.__model_force_square(x, b))
-    #     return self.__model_force_square(x, b)
-
-
     
-    def _generate_data(self, model_force="Piecewise_simple", random_force='Gauss'):
-        """Function, that generates time series of ion channel model and saves it to csv file.
+    def _generate_data(self, model_force="Piecewise_simple", random_force='Gauss', save_to_pickle=True):
+        """Function, that generates time series of ion channel model and saves it to `pickle` file if `save_to_pickle` True.
 
         Parameters
         ----------
-        model_force : str
+        model_force : str, optional
             Choice of model function.
                 - ``Square`` for ``__model_force_square``
                 - `asymetrical` for ``__model_force_asymetrical``
-        random_force : str
+                - `piecewise` for `__model_force_piecewise`
+                - `piecewise_simple` for `__model_force_piecewise_simple`. Default value.
+        random_force : str, optional
             Choice of noise random function. 
-                - ``Gauss`` for ``__random_force_gauss``
+                - ``Gauss`` for ``__random_force_gauss``. Default value.
                 - ``Levy`` for ``__random_force_levy``
+        save_to_pickle: bool, optional
+            Flag whether to save generated data to pickle or not.
         """
-        if random_force.lower() == str.lower('Gauss'):
-            self.__random_force = self.__random_force_gauss
-        else:
-            self.__random_force = self.__random_force_levy
+        name = 'data_'
 
-        match model_force.lower() :
+        match model_force.lower():
             case "square":
                 self.__model_force = self.__model_force_square
+                name += "Square_"
             case "asymetrical":
                 self.__model_force = self.__model_force_asymetrical
+                name += f"Asymetrical_k{self.__force_params['k']}_"
             case "piecewise":
                 self.__model_force = self.__model_force_piecewise
+                name += "Piecewise_"
             case "piecewise_simple":
                 self.__model_force = self.__model_force_piecewise_simple
+                name += "Piecewise_simple_"
+
+        if random_force.lower() == str.lower('Gauss'):
+            self.__random_force = self.__random_force_gauss
+            name += f'{random_force}_a{self.__a}_D{self.__D}_o{self.__opened[0]}_c{self.__closed[0]}_delta_t{self.__delta_t}'
+        else:
+            self.__random_force = self.__random_force_levy
+            name += f'{random_force}_a{self.__a}_D{self.__D}_o{self.__opened[0]}_c{self.__closed[0]}_delta_t{self.__delta_t}_{list(self.__force_params.values()) if isinstance(self.__force_params, dict) else '_'}'
+
         t = 0
         self.dwell_times = []
         # generating first state of ion channel (opened/closed)
         b = self.__generator1.choice([self.__closed, self.__opened])
         tau = self.__generator1.exponential(b[1])
-        # print(tau)
         self.dwell_times.append(tau)
         self._opened_larger = self.__opened[0] > self.__closed[0]
         self.__opened_state = b[0] == self.__opened[0]
@@ -331,7 +334,7 @@ class IonChannel:
             t += 1
             tau -= self.__delta_t
             if(tau - self.__delta_t < self.__delta_t):
-                self.breakpoints.append(times[t-1])
+                self.breakpoints.append(times[t])
                 self.__opened_state = b[0] == self.__opened[0]
                 if self.__opened_state:
                     b=self.__closed
@@ -341,15 +344,17 @@ class IonChannel:
                 self.dwell_times.append(tau)
                 random_force_values = np.append(random_force_values, self.__random_force(np.int32(tau//self.__delta_t)))
 
-
         self.data = np.array(self.data)
         self.breakpoints = np.array(self.breakpoints)        
         self.data_transposed = self.data.T
-        # save_file = os.path.join(os.getcwd(), 'outputs', f'data_{random_force}_a{self.__a}_D{self.__D}_o{self.__opened[0]}_c{self.__closed[0]}_delta_t{self.__delta_t}_{list(self.__force_params.values()) if isinstance(self.__force_params, dict) else '_'}.csv')
-        # np.savetxt(save_file, self.data, delimiter=',', header='time,position,state', fmt=['%e', '%e', '%d'])
+        if save_to_pickle:            
+            data_dictionary = {'times': self.data_transposed[0], 'x' : self.data_transposed[1], 'break_points': self.breakpoints}
+            save_file = os.path.join(os.getcwd(), 'outputs', name)
+            with open(f'{save_file}.pickle', 'wb') as handle:
+                pickle.dump(data_dictionary, handle, protocol=pickle.DEFAULT_PROTOCOL)        
 
     def __calculate_ranges(self):
-        """Calculates ranges of data.
+        """Calculates ranges of data. Used to better visualize data.
         """
         LUT_threshold = {10.0: 1.0, 50.0: 2.0, 100.0 : 3.0, 200.0 : 4.0, 500.0 : 7.0, 1000 : 9.0}
         minimum = np.min(self.data_transposed[1])
@@ -423,7 +428,6 @@ class IonChannel:
             Number of bins, by default 100.
         """
         N, bins, patches = ax.hist(self.data_transposed[1], bins=bins, range=(self.__bottom, self.__top))
-        # range=(self.__bottom, self.__top)
         fracs = N / N.max()
         norm = colors.Normalize(fracs.min(), fracs.max())
         for thisfrac, thispatch in zip(fracs, patches):
@@ -434,7 +438,23 @@ class IonChannel:
         
 
     def calculate_hurst_exponent(self, data):
-        
+        """Calculates Hurst Exponent using Rescaled Range Analysis
+
+        Parameters
+        ----------
+        data : ndarray
+            Data to calculate the Hurst Exponent on.
+
+        Returns
+        -------
+        float
+            Hurst Exponent.
+
+        Raises
+        ------
+        ValueError
+            Raised value error if data is shorter than 20 records long.
+        """
         N = len(data)
         if N < 20:
             raise ValueError("Time series is too short! input series ought to have at least 20 samples!")
@@ -457,14 +477,12 @@ class IonChannel:
         
         log_R_S = []
         log_n = []
-        # print(R_S_dict)
         for i in range(len(R_S_dict)):
             R_S = (R_S_dict[i]["R"]+np.spacing(1)) / (R_S_dict[i]["S"]+np.spacing(1))
             log_R_S.append(np.log(R_S))
             log_n.append(np.log(R_S_dict[i]["n"]))
         
         Hurst_exponent = np.polynomial.Polynomial.fit(log_n,log_R_S,1).convert().coef[1]
-        # Hurst_exponent = np.polyfit(log_n,log_R_S,1)[0]
         return Hurst_exponent
 
     def calculate_autocorrelation_acf(self, data, fig, ax, lags=100):
@@ -493,14 +511,30 @@ class IonChannel:
         return fig, ax
 
     def dfa(self, data):
+        """Logic for Detrended Fluctuation Analysis. 
+
+        Parameters
+        ----------
+        data : ndarray
+            Data to calculate the Detrended Fluctuation Analysis on.
+
+        Returns
+        -------
+        tuple
+            Tuple with:
+            * `n` - number of segments
+            * `F` - total fluctuation
+            * `list_alpha` - list of alpha exponents
+            * `list_alpha_intercepts`
+            * `limit_list`
+        """
         a = fu.toAggregated(data)
         pydfa = fathon.DFA(a)
         winSizes = np.arange(5, np.size(a) + 1, 5, dtype=np.int64)
         
         revSeg = True
-        polOrd = 3
-
-        n, F = pydfa.computeFlucVec(winSizes, revSeg=revSeg, polOrd=polOrd)
+        
+        n, F = pydfa.computeFlucVec(winSizes, revSeg=revSeg, polOrd=self._pol_ord)
         max_limit = np.log(winSizes[-1])
         mid_point = winSizes[int(np.round(np.e**(max_limit//2), decimals=0))]
         limits_list = np.array([[winSizes[10], mid_point], [mid_point, winSizes[-1]], [winSizes[10], winSizes[-1]]], dtype=int)
@@ -508,23 +542,9 @@ class IonChannel:
 
         return n, F, list_alpha, list_alpha_intercept, limits_list
 
-    def gpu_dfa(self, data):
-        data = cp.array(data)
-        # zagregowanie danych tak, że jest to kumulatwyna suma różnicy między wartościami a średnią
-        mean = cp.mean(data)
-        a = cp.cumsum(data - mean)
-
-        winSizes = np.arange(5, cp.size(a) + 1, 5, dtype=np.int64)
-        
-        polOrd = 1
-        for n in winSizes:
-            # podziel a na sekwencje o długości n
-
-
-
     def plot_autocorrelation_dfa(self, data, fig, ax, stationarity=False):
         """
-        Calculates, shows and saves Detrended Fluctuation Analysis plots with Hurst exponent for autocorrelation. 
+        Calculates, shows and saves Detrended Fluctuation Analysis plots with alpha exponent for autocorrelation. 
         Depending on the value of H it is:
         * alpha < 0.5 - anti-correlated
         * alpha around 0.5 - uncorrelated, white noise
@@ -542,6 +562,8 @@ class IonChannel:
             Figure on which autocorrelation is plotted.
         ax : matplotlib.pyplot.Axes
             Subplot ax to put plot into.
+        stationary: bool, optional
+            If True calculate stationarity of `data` using ADF, by default False.
 
         Examples:
         ---------
@@ -569,11 +591,9 @@ class IonChannel:
                     clrs[i%len(clrs)]+stls[(i//len(clrs))%len(stls)], label=(r'$\alpha$' + ' = {:.2f}'.format(list_alpha[i])))
         ax.set_xlabel('ln(n)', fontsize=14)
         ax.set_ylabel('ln(F(n))', fontsize=14)
-        ax.set_title(('Stationary' if stationary else 'Non-stationary ') if stationarity else ('') + 'DFA' , fontsize=14)
+        ax.set_title(('Stationary' if stationary else 'Non-stationary ') if stationarity else ('') + f'DFA Polynomial Degree {self._pol_ord}' , fontsize=14)
         ax.legend(loc=0, fontsize=14)
         return fig, ax
-
-
 
     def save_figure(self, fig : plt.Figure, title : str, name = "figure", with_subfigures=True):
         """Saves ``fig`` into folder *outputs2* subfolder ``title`` and file name ``name`` .
@@ -623,9 +643,9 @@ class InteractiveIonChannel():
         """
         self.__a_slider = FloatSlider(min=0.0, max=5000.0, step=1, value=1000.0, description='a')
         self.__closed_0_slider = IntSlider(min=-50, max=50, step=1, value=-38, description='Closed value')
-        self.__closed_1_slider = FloatSlider(min=0.0, max=1000.0, step=0.1, value=30.0, description='Closed avg time(scaled by delta_t)')
+        self.__closed_1_slider = FloatSlider(min=0.0, max=1000.0, step=0.1, value=10.0, description='Closed avg time(scaled by delta_t)')
         self.__opened_0_slider = IntSlider(min=-50, max=50, step=1, value=-34, description='Opened value')
-        self.__opened_1_slider = FloatSlider(min=0.0, max=1000.0, step=0.1, value=3.0, description='Opened avg time(scaled by delta_t)')
+        self.__opened_1_slider = FloatSlider(min=0.0, max=1000.0, step=0.1, value=2.0, description='Opened avg time(scaled by delta_t)')
         self.__D_slider = FloatSlider(min=0.00, max=5000.00, step=0.01, value=100.0, description='D')
         self.__delta_t_slider = SelectionSlider(
             options=[10**-i for i in range(3, 6)],
@@ -656,6 +676,7 @@ class InteractiveIonChannel():
         self.__takes_previous = Checkbox(value=True, description='Takes previous values')
         self.__draw_vlines_at_breakpoint = Checkbox(value=False, description='Draw breakpoints')
         self.__seed_select = IntSlider(min=0, max=99999, value=12345, step=1, description='Seed')
+        self.__pol_ord_select = IntSlider(min=1, max=3, value=1, step=1, description='Polynomial degree')
         self.__force_params_box = VBox()
         
 
@@ -674,6 +695,7 @@ class InteractiveIonChannel():
             records=self.__records_slider.value,
             takes_prev_vals=self.__takes_previous.value,
             seed=int(self.generator.random()*100000),
+            pol_ord=self.__pol_ord_select.value,
             **self.__force_params
         )
         self.ion_channel._generate_data(self.__force_dropdown.value, self.__random_force_dropdown.value)
@@ -722,7 +744,8 @@ class InteractiveIonChannel():
             self.__random_force_dropdown,
             self.__force_dropdown,
             self.__force_params_box,
-            self.__draw_vlines_at_breakpoint
+            self.__draw_vlines_at_breakpoint,
+            self.__pol_ord_select
         )
         run_button = Button(description="Run Model")
         run_button.on_click(self.__on_button_click)
@@ -755,9 +778,9 @@ class InteractiveIonChannel():
                 name = "Piecewise_simple_"
         match self.__random_force_dropdown.value:
             case "Gauss":
-                name += f"{self.__random_force_dropdown.value}_D{D}_a{self.__a_slider.value}_{self.__seed_select.value}"
+                name += f"{self.__random_force_dropdown.value}_D{D}_a{self.__a_slider.value}_{self.__seed_select.value}_n{self.__pol_ord_select.value}"
             case "Levy":
-                name += f"{self.__random_force_dropdown.value}_D{D}_a{self.__a_slider.value}_alpha{self.__force_params["alpha"]}_beta{self.__force_params["beta"]}_scale{self.__force_params["scale"]}_{self.__seed_select.value}"
+                name += f"{self.__random_force_dropdown.value}_D{D}_a{self.__a_slider.value}_alpha{self.__force_params["alpha"]}_beta{self.__force_params["beta"]}_scale{self.__force_params["scale"]}_{self.__seed_select.value}_n{self.__pol_ord_select.value}"
         
 
         data = self.ion_channel.data_transposed[1] # because self.data is shape (records, 3)
@@ -784,7 +807,7 @@ class InteractiveIonChannel():
         return self.ion_channel.dfa(self.ion_channel.data_transposed[1])[2]
 
     @staticmethod
-    def multiprocessed_worker(args):
+    def __multiprocessed_worker(args):
         D, nr_of_tests, seed, force_params, force_dropdown_value, random_force_dropdown_value, delta_t_slider_value, records_slider_value, takes_previous_value, closed, opened, a_slider_value = args
         alpha_low = 0
         alpha_high = 0
@@ -823,10 +846,10 @@ class InteractiveIonChannel():
             alpha_high = 0
             alpha_all = 0
             core_count = multiprocessing.cpu_count()
-            nr_of_tests = 128
+            nr_of_tests = 100
             batch_for_core = nr_of_tests // core_count
             D_list = [10.0, 50.0, 100.0, 500.0]
-            for noise in ["Levy","Gauss"]:
+            for noise in ["Gauss", "Levy"]:
                 noise_dict = dict([])
                 self.generator = np.random.Generator(np.random.PCG64(seed=self.__seed_select.value))
                 self.__random_force_dropdown.value = noise
@@ -837,7 +860,7 @@ class InteractiveIonChannel():
                         for _ in range(core_count)
                     ]
                     with multiprocessing.Pool(core_count) as p:
-                        results = p.map(self.multiprocessed_worker, args_list)
+                        results = p.map(self.__multiprocessed_worker, args_list)
                     for result in results:
                         alpha_low += result[0]
                         alpha_high += result[1]
