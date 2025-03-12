@@ -849,9 +849,10 @@ class InteractiveIonChannel():
             alpha_high = 0
             alpha_all = 0
             core_count = multiprocessing.cpu_count()
-            nr_of_tests = 108
+            nr_of_tests = 100
             batch_for_core = nr_of_tests // core_count
-            D_list = [10.0]
+            residual_batch = nr_of_tests - (core_count * batch_for_core)
+            D_list = [100.0]
             for noise in ["Gauss"]:
                 noise_dict = dict([])
                 self.generator = np.random.Generator(np.random.PCG64(seed=self.__seed_select.value))
@@ -862,6 +863,10 @@ class InteractiveIonChannel():
                         (D, batch_for_core, int(self.generator.random()*10000), self.__force_params, self.__force_dropdown.value, self.__random_force_dropdown.value, self.__delta_t_slider.value, self.__records_slider.value, self.__takes_previous.value, (self.__closed_0_slider.value, self.__closed_1_slider.value), (self.__opened_0_slider.value, self.__opened_1_slider.value), self.__a_slider.value, self.__pol_ord_select.value)
                         for _ in range(core_count)
                     ]
+                    if residual_batch != 0:
+                        args_list.append(
+                        (D, residual_batch, int(self.generator.random()*10000), self.__force_params, self.__force_dropdown.value, self.__random_force_dropdown.value, self.__delta_t_slider.value, self.__records_slider.value, self.__takes_previous.value, (self.__closed_0_slider.value, self.__closed_1_slider.value), (self.__opened_0_slider.value, self.__opened_1_slider.value), self.__a_slider.value, self.__pol_ord_select.value)
+                        )
                     with multiprocessing.Pool(core_count) as process:
                         results = process.map(self.multiprocessed_worker, args_list)
                     for result in results:
