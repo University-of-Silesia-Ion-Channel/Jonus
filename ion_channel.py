@@ -111,10 +111,8 @@ class IonChannel:
         self.__delta_t = delta_t
         self.__records = records
         self.__takes_prev_vals = takes_prev_vals
-        if len(force_params) == 0:
-            self.__force_params = {'alpha':1.9, 'beta':0.9, 'scale':1.5}
-        else:
-            self.__force_params = force_params
+        
+        self.__force_params = force_params
         # generator for state and how long its in the state
         self.__generator1 = np.random.Generator(np.random.PCG64(seed=seed))
         # generator for random force
@@ -807,7 +805,7 @@ class InteractiveIonChannel():
         return self.ion_channel.dfa(self.ion_channel.data_transposed[1])[2]
 
     @staticmethod
-    def __multiprocessed_worker(args):
+    def multiprocessed_worker(args):
         D, nr_of_tests, seed, force_params, force_dropdown_value, random_force_dropdown_value, delta_t_slider_value, records_slider_value, takes_previous_value, closed, opened, a_slider_value = args
         alpha_low = 0
         alpha_high = 0
@@ -825,7 +823,7 @@ class InteractiveIonChannel():
                 seed=int(generator.random()*100000),
                 **force_params
             )
-            ion_channel._generate_data(force_dropdown_value, random_force_dropdown_value)
+            ion_channel._generate_data(force_dropdown_value, random_force_dropdown_value, save_to_pickle=False)
             alpha_list = ion_channel.dfa(ion_channel.data_transposed[1])[2]
             alpha_low += alpha_list[0]
             alpha_high += alpha_list[1]
@@ -859,8 +857,8 @@ class InteractiveIonChannel():
                         (D, batch_for_core, int(self.generator.random()*10000), self.__force_params, self.__force_dropdown.value, self.__random_force_dropdown.value, self.__delta_t_slider.value, self.__records_slider.value, self.__takes_previous.value, (self.__closed_0_slider.value, self.__closed_1_slider.value), (self.__opened_0_slider.value, self.__opened_1_slider.value), self.__a_slider.value)
                         for _ in range(core_count)
                     ]
-                    with multiprocessing.Pool(core_count) as p:
-                        results = p.map(self.__multiprocessed_worker, args_list)
+                    with multiprocessing.Pool(core_count) as process:
+                        results = process.map(self.multiprocessed_worker, args_list)
                     for result in results:
                         alpha_low += result[0]
                         alpha_high += result[1]
