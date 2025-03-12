@@ -321,7 +321,7 @@ class IonChannel:
         times = np.linspace(0, self.__records*self.__delta_t, self.__records, endpoint=False)
         self.data.append([times[0], x[0], b[0]])
         t += 1
-        while t < self.__records:
+        while True:
             new_x = (
                 self.__takes_prev_vals * x[t - 1] +
                 self.__model_force(x[t - 1], b[0]) * self.__delta_t +
@@ -331,6 +331,10 @@ class IonChannel:
             self.data.append([times[t], x[t], b[0]])
             t += 1
             tau -= self.__delta_t
+
+            if t >= self.__records:
+                break
+
             if(tau - self.__delta_t < self.__delta_t):
                 self.breakpoints.append(times[t])
                 self.__opened_state = b[0] == self.__opened[0]
@@ -806,7 +810,7 @@ class InteractiveIonChannel():
 
     @staticmethod
     def multiprocessed_worker(args):
-        D, nr_of_tests, seed, force_params, force_dropdown_value, random_force_dropdown_value, delta_t_slider_value, records_slider_value, takes_previous_value, closed, opened, a_slider_value = args
+        D, nr_of_tests, seed, force_params, force_dropdown_value, random_force_dropdown_value, delta_t_slider_value, records_slider_value, takes_previous_value, closed, opened, a_slider_value, pol_ord = args
         alpha_low = 0
         alpha_high = 0
         alpha_all = 0
@@ -821,6 +825,7 @@ class InteractiveIonChannel():
                 records=records_slider_value,
                 takes_prev_vals=takes_previous_value,
                 seed=int(generator.random()*100000),
+                pol_ord=pol_ord,
                 **force_params
             )
             ion_channel._generate_data(force_dropdown_value, random_force_dropdown_value, save_to_pickle=False)
@@ -844,17 +849,17 @@ class InteractiveIonChannel():
             alpha_high = 0
             alpha_all = 0
             core_count = multiprocessing.cpu_count()
-            nr_of_tests = 100
+            nr_of_tests = 108
             batch_for_core = nr_of_tests // core_count
-            D_list = [10.0, 50.0, 100.0, 500.0]
-            for noise in ["Gauss", "Levy"]:
+            D_list = [10.0]
+            for noise in ["Gauss"]:
                 noise_dict = dict([])
                 self.generator = np.random.Generator(np.random.PCG64(seed=self.__seed_select.value))
                 self.__random_force_dropdown.value = noise
                 for D in D_list:
                     alpha_dict = dict([])
                     args_list = [
-                        (D, batch_for_core, int(self.generator.random()*10000), self.__force_params, self.__force_dropdown.value, self.__random_force_dropdown.value, self.__delta_t_slider.value, self.__records_slider.value, self.__takes_previous.value, (self.__closed_0_slider.value, self.__closed_1_slider.value), (self.__opened_0_slider.value, self.__opened_1_slider.value), self.__a_slider.value)
+                        (D, batch_for_core, int(self.generator.random()*10000), self.__force_params, self.__force_dropdown.value, self.__random_force_dropdown.value, self.__delta_t_slider.value, self.__records_slider.value, self.__takes_previous.value, (self.__closed_0_slider.value, self.__closed_1_slider.value), (self.__opened_0_slider.value, self.__opened_1_slider.value), self.__a_slider.value, self.__pol_ord_select.value)
                         for _ in range(core_count)
                     ]
                     with multiprocessing.Pool(core_count) as process:
