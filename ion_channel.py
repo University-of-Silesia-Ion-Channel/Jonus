@@ -316,7 +316,7 @@ class IonChannel:
         self.dwell_times.append(tau)
         self._opened_larger = self.__opened[0] > self.__closed[0]
         self.__opened_state = b[0] == self.__opened[0]
-        random_force_values = self.__random_force(np.int32(tau//self.__delta_t))
+        random_force_values = self.__random_force(np.int32(tau//self.__delta_t) + 1)
         x = np.array([b[0]], dtype=np.float32)
         times = np.linspace(0, self.__records*self.__delta_t, self.__records, endpoint=False)
         self.data.append([times[0], x[0], b[0]])
@@ -325,7 +325,7 @@ class IonChannel:
             new_x = (
                 self.__takes_prev_vals * x[t - 1] +
                 self.__model_force(x[t - 1], b[0]) * self.__delta_t +
-                random_force_values[t]
+                random_force_values[t - 1]
                 )
             x = np.append(x, new_x)
             self.data.append([times[t], x[t], b[0]])
@@ -344,7 +344,7 @@ class IonChannel:
                     b=self.__opened
                 tau = self.__generator1.exponential(b[1])
                 self.dwell_times.append(tau)
-                random_force_values = np.append(random_force_values, self.__random_force(np.int32(tau//self.__delta_t)))
+                random_force_values = np.append(random_force_values, self.__random_force(np.int32(tau//self.__delta_t) + 1))
 
         self.data = np.array(self.data)
         self.breakpoints = np.array(self.breakpoints)        
@@ -849,11 +849,11 @@ class InteractiveIonChannel():
             alpha_high = 0
             alpha_all = 0
             core_count = multiprocessing.cpu_count()
-            nr_of_tests = 100
+            nr_of_tests = 128
             batch_for_core = nr_of_tests // core_count
             residual_batch = nr_of_tests - (core_count * batch_for_core)
-            D_list = [100.0]
-            for noise in ["Gauss"]:
+            D_list = [10.0, 50.0, 100.0, 500.0]
+            for noise in ["Levy","Gauss"]:
                 noise_dict = dict([])
                 self.generator = np.random.Generator(np.random.PCG64(seed=self.__seed_select.value))
                 self.__random_force_dropdown.value = noise
@@ -876,10 +876,6 @@ class InteractiveIonChannel():
                     alpha_low /= nr_of_tests
                     alpha_high /= nr_of_tests
                     alpha_all /= nr_of_tests
-                    alpha_dict[D] = [alpha_low, alpha_high, alpha_all]
-                noise_dict[noise] = alpha_dict
-                with open('alpha.csv', 'a') as f:
-                    # f.write('Noise,D,alpha_low,alpha_high,alpha_all\n')
-                    for noise, alpha_dict in noise_dict.items():
-                        for D, alphas in alpha_dict.items():
-                            f.write(f'{noise}, {D}, {alphas[0]}, {alphas[1]}, {alphas[2]}\n')
+                    alphas = [alpha_low, alpha_high, alpha_all]
+                    with open('alpha.csv', 'a') as f:
+                        f.write(f'{noise}, {D}, {alphas[0]}, {alphas[1]}, {alphas[2]}\n')
