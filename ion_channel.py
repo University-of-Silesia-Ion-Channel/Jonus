@@ -228,8 +228,8 @@ class IonChannel:
     def __model_force_piecewise_simple(self, x, b):
         """Function calculates force value with simple piecewise potential.
         """
-        if np.abs(x-b) < 0.1:
-            return 0.0
+        # if np.abs(x-b) < 0.1:
+        #     return 0.0
         if self._opened_larger:
             # przypadek gdy otwarty większy
             if b == self.__closed[0]:
@@ -238,14 +238,14 @@ class IonChannel:
                     return -self.__a
                 if x > self.__opened[0]:
                     return self.__model_force_square(x, self.__opened[0] - 1)
-                if x < self.__closed[0]:
-                    return self.__model_force_square(x, self.__closed[0] + 1)
+                if x <= self.__closed[0]:
+                    return self.__model_force_square(x, self.__closed[0])
             else:
                 # przypadek gdy stan jest otwarty
                 if x >= self.__closed[0] and x < self.__opened[0]:
                     return self.__a
-                if x > self.__opened[0]:
-                    return self.__model_force_square(x, self.__opened[0] - 1)
+                if x >= self.__opened[0]:
+                    return self.__model_force_square(x, self.__opened[0])
                 if x < self.__closed[0]:
                     return self.__model_force_square(x, self.__closed[0] + 1)
         else:
@@ -254,8 +254,8 @@ class IonChannel:
                 # przypadek gdy stan jest zamknięty
                 if x >= self.__opened[0] and x < self.__closed[0]:
                     return self.__a
-                if x > self.__closed[0]:
-                    return self.__model_force_square(x, self.__closed[0] - 1)
+                if x >= self.__closed[0]:
+                    return self.__model_force_square(x, self.__closed[0])
                 if x < self.__opened[0]:
                     return self.__model_force_square(x, self.__opened[0] + 1)
             else:
@@ -264,8 +264,8 @@ class IonChannel:
                     return -self.__a
                 if x > self.__closed[0]:
                     return self.__model_force_square(x, self.__closed[0] - 1)
-                if x < self.__opened[0]:
-                    return self.__model_force_square(x, self.__opened[0] + 1)
+                if x <= self.__opened[0]:
+                    return self.__model_force_square(x, self.__opened[0])
     
     def _generate_data(self, model_force="Piecewise_simple", random_force='Gauss', save_to_pickle=True):
         """Function, that generates time series of ion channel model and saves it to `pickle` file if `save_to_pickle` True.
