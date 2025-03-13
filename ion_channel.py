@@ -120,6 +120,7 @@ class IonChannel:
         self._pol_ord = pol_ord
         self.data = []
         self.breakpoints = []
+        self.__m = (closed[0]+opened[0]) / 2
 
     def __random_force_gauss(self, records):
         """Function generates random force values using standard gaussian distribution.
@@ -217,55 +218,66 @@ class IonChannel:
         k = self.__force_params['k']
         return -k*self.__a*(x-b)*(x-self.__closed[0]) if self.__opened_state else self.__a*(x-b)*(x-self.__opened[0])
 
-    # def __model_force_piecewise_simple(self, x, b):
-    #     if np.abs(x-b) < 0.1:
-    #         return 0
-    #     if x > b:
-    #         return -self.__a
-    #     else:
-    #         return self.__a
-
     def __model_force_piecewise_simple(self, x, b):
         """Function calculates force value with simple piecewise potential.
         """
-        # if np.abs(x-b) < 0.1:
-        #     return 0.0
-        if self._opened_larger:
-            # przypadek gdy otwarty większy
-            if b == self.__closed[0]:
-                # przypadek gdy stan jest zamknięty
-                if x > self.__closed[0] and x <= self.__opened[0]:
-                    return -self.__a
-                if x > self.__opened[0]:
-                    return self.__model_force_square(x, self.__opened[0] - 1)
-                if x <= self.__closed[0]:
-                    return self.__model_force_square(x, self.__closed[0])
-            else:
-                # przypadek gdy stan jest otwarty
-                if x >= self.__closed[0] and x < self.__opened[0]:
-                    return self.__a
-                if x >= self.__opened[0]:
-                    return self.__model_force_square(x, self.__opened[0])
-                if x < self.__closed[0]:
-                    return self.__model_force_square(x, self.__closed[0] + 1)
+        phi = self._opened_larger
+        psi = self.__opened_state
+        b_1 = self.__opened[0] if not psi else self.__closed[0]
+
+        if (phi and not psi) or (not phi and psi):
+            if x > b and x <= b_1:
+                return -self.__a
+            if x > b_1:
+                return self.__model_force_square(x, b_1 - 1)
+            if x <= b:
+                return self.__model_force_square(x, b)
         else:
-            # przypadek gdy zamknięty większy
-            if b == self.__closed[0]:
-                # przypadek gdy stan jest zamknięty
-                if x >= self.__opened[0] and x < self.__closed[0]:
-                    return self.__a
-                if x >= self.__closed[0]:
-                    return self.__model_force_square(x, self.__closed[0])
-                if x < self.__opened[0]:
-                    return self.__model_force_square(x, self.__opened[0] + 1)
-            else:
-                # przypadek gdy stan jest otwarty
-                if x > self.__opened[0] and x <= self.__closed[0]:
-                    return -self.__a
-                if x > self.__closed[0]:
-                    return self.__model_force_square(x, self.__closed[0] - 1)
-                if x <= self.__opened[0]:
-                    return self.__model_force_square(x, self.__opened[0])
+            # if (phi and psi) or (not phi and not psi):
+            if x >= b_1 and x < b:
+                return self.__a
+            if x >= b:
+                return self.__model_force_square(x, b)
+            if x < b_1:
+                return self.__model_force_square(x, b_1 + 1)
+        
+
+        # if phi:
+        #     # przypadek gdy otwarty większy
+        #     if not psi:
+        #         # przypadek gdy stan jest zamknięty
+        #         if x > b and x <= b_1:
+        #             return -self.__a
+        #         if x > b_1:
+        #             return self.__model_force_square(x, b_1 - 1)
+        #         if x <= b:
+        #             return self.__model_force_square(x, b)
+        #     else: # psi
+        #         # przypadek gdy stan jest otwarty
+        #         if x >= b_1 and x < b:
+        #             return self.__a
+        #         if x >= b:
+        #             return self.__model_force_square(x, b)
+        #         if x < b_1:
+        #             return self.__model_force_square(x, b_1 + 1)
+        # else: # not phi
+        #     # przypadek gdy zamknięty większy
+        #     if not psi:
+        #         # przypadek gdy stan jest zamknięty
+        #         if x >= b_1 and x < b:
+        #             return self.__a
+        #         if x >= b:
+        #             return self.__model_force_square(x, b)
+        #         if x < b_1:
+        #             return self.__model_force_square(x, b_1 + 1)
+        #     else: # psi
+        #         # przypadek gdy stan jest otwarty
+        #         if x > b and x <= b_1:
+        #             return -self.__a
+        #         if x > b_1:
+        #             return self.__model_force_square(x, b_1 - 1)
+        #         if x <= b:
+        #             return self.__model_force_square(x, b)                    
     
     def _generate_data(self, model_force="Piecewise_simple", random_force='Gauss', save_to_pickle=True):
         """Function, that generates time series of ion channel model and saves it to `pickle` file if `save_to_pickle` True.
@@ -756,6 +768,10 @@ class InteractiveIonChannel():
         run_button_test = Button(description="Run Model (Test)")
         run_button_test.on_click(self.__on_button_click)
         display(run_button_test)
+
+        run_button_test_singular = Button(description="Run Model (Singular)")
+        run_button_test_singular.on_click(self.__on_button_click)
+        display(run_button_test_singular)
         
     def __on_click_event(self, D):
         """Helper method for ``__on_button_click__``. Generates data(plots) according to users input in ``interact``.
@@ -801,12 +817,8 @@ class InteractiveIonChannel():
 
     def __multi_on_click_event(self, index):
         data = self.ion_channel.data_transposed[1]
-        self.__fig_autocorr, self.__axs_autocorr[index][0] = self.ion_channel.calculate_autocorrelation_acf(data, self.__fig_autocorr, self.__axs_autocorr[index][0], lags=self.__fft_lags.value)
-        self.__fig_autocorr, self.__axs_autocorr[index][1] = self.ion_channel.plot_autocorrelation_dfa(data, self.__fig_autocorr, self.__axs_autocorr[index][1])
-        
-    def __alpha_on_click_event(self, D):
-        self.__ion_channel_interactive()
-        return self.ion_channel.dfa(self.ion_channel.data_transposed[1])[2]
+        # self.__fig_autocorr, self.__axs_autocorr[index][0] = self.ion_channel.calculate_autocorrelation_acf(data, self.__fig_autocorr, self.__axs_autocorr[index][0], lags=self.__fft_lags.value)
+        self.__fig_autocorr, self.__axs_autocorr[index] = self.ion_channel.plot_autocorrelation_dfa(data, self.__fig_autocorr, self.__axs_autocorr[index])
 
     @staticmethod
     def multiprocessed_worker(args):
@@ -840,11 +852,11 @@ class InteractiveIonChannel():
         Callback for the 'Run Model'/'Run Model (test)' button.
         """
         self.__force_params = {child.description: child.value for child in self.__force_params_box.children}
-        if (b.description == 'Run Model'):
+        if b.description == "Run Model":
             self.generator = np.random.Generator(np.random.PCG64(seed=self.__seed_select.value))
             self.__ion_channel_interactive()
             self.__on_click_event(self.__D_slider.value)
-        else:
+        if b.description == "Run Model (Test)":
             alpha_low = 0
             alpha_high = 0
             alpha_all = 0
@@ -853,12 +865,10 @@ class InteractiveIonChannel():
             batch_for_core = nr_of_tests // core_count
             residual_batch = nr_of_tests - (core_count * batch_for_core)
             D_list = [10.0, 50.0, 100.0, 500.0]
-            for noise in ["Levy","Gauss"]:
-                noise_dict = dict([])
+            for noise in ["Levy", "Gauss"]:
                 self.generator = np.random.Generator(np.random.PCG64(seed=self.__seed_select.value))
                 self.__random_force_dropdown.value = noise
                 for D in D_list:
-                    alpha_dict = dict([])
                     args_list = [
                         (D, batch_for_core, int(self.generator.random()*10000), self.__force_params, self.__force_dropdown.value, self.__random_force_dropdown.value, self.__delta_t_slider.value, self.__records_slider.value, self.__takes_previous.value, (self.__closed_0_slider.value, self.__closed_1_slider.value), (self.__opened_0_slider.value, self.__opened_1_slider.value), self.__a_slider.value, self.__pol_ord_select.value)
                         for _ in range(core_count)
@@ -879,3 +889,19 @@ class InteractiveIonChannel():
                     alphas = [alpha_low, alpha_high, alpha_all]
                     with open('alpha.csv', 'a') as f:
                         f.write(f'{noise}, {D}, {alphas[0]}, {alphas[1]}, {alphas[2]}\n')
+        if b.description == "Run Model (Singular)":
+            for n in range(1, 3):
+                self.__pol_ord_select.value = n
+                D_list = [10.0, 50.0, 100.0, 500.0]
+                for noise in ["Levy", "Gauss"]:
+                    self.__fig_autocorr, self.__axs_autocorr = plt.subplots(len(D_list), 1, constrained_layout=True)
+                    self.__fig_autocorr.set_size_inches(12, 6*len(D_list))
+                    self.__random_force_dropdown.value = noise
+                    for ind, D in enumerate(D_list):
+                        self.generator = np.random.Generator(np.random.PCG64(seed=self.__seed_select.value))
+                        self.__D_slider.value = D
+                        self.__ion_channel_interactive()
+                        self.__multi_on_click_event(ind)
+                        self.__on_click_event(D)
+                        self.__axs_autocorr[ind].set_title(f"DFA polynomial degree {self.__pol_ord_select.value} for {noise} D = {D}")
+                    self.ion_channel.save_figure(self.__fig_autocorr, noise, name = f"DFA {noise} {self.__pol_ord_select.value}", with_subfigures=False)
