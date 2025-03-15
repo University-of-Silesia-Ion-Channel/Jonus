@@ -224,7 +224,7 @@ class IonChannel:
         phi = self._opened_larger
         psi = self.__opened_state
         b_1 = self.__opened[0] if not psi else self.__closed[0]
-
+        
         if (phi and not psi) or (not phi and psi):
             if x > b and x <= b_1:
                 return -self.__a
@@ -765,11 +765,11 @@ class InteractiveIonChannel():
         run_button.on_click(self.__on_button_click)
         display(run_button)
 
-        run_button_test = Button(description="Run Model (Test)")
+        run_button_test = Button(description="Test MT")
         run_button_test.on_click(self.__on_button_click)
         display(run_button_test)
 
-        run_button_test_singular = Button(description="Run Model (Singular)")
+        run_button_test_singular = Button(description="Test Single")
         run_button_test_singular.on_click(self.__on_button_click)
         display(run_button_test_singular)
         
@@ -849,14 +849,14 @@ class InteractiveIonChannel():
     
     def __on_button_click(self, b : Button):
         """
-        Callback for the 'Run Model'/'Run Model (test)' button.
+        Callback for the 'Run Model'/'Test MT'/'Test Single' button.
         """
         self.__force_params = {child.description: child.value for child in self.__force_params_box.children}
         if b.description == "Run Model":
             self.generator = np.random.Generator(np.random.PCG64(seed=self.__seed_select.value))
             self.__ion_channel_interactive()
             self.__on_click_event(self.__D_slider.value)
-        if b.description == "Run Model (Test)":
+        if b.description == "Test MT":
             alpha_low = 0
             alpha_high = 0
             alpha_all = 0
@@ -889,7 +889,7 @@ class InteractiveIonChannel():
                     alphas = [alpha_low, alpha_high, alpha_all]
                     with open('alpha.csv', 'a') as f:
                         f.write(f'{noise}, {D}, {alphas[0]}, {alphas[1]}, {alphas[2]}\n')
-        if b.description == "Run Model (Singular)":
+        if b.description == "Test Single":
             for n in range(1, 3):
                 self.__pol_ord_select.value = n
                 D_list = [10.0, 50.0, 100.0, 500.0]
