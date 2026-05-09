@@ -61,7 +61,7 @@ class IonChannel:
         Generates Ion Channel time series data
     """
 
-    def __init__(self, a=1000.0, closed=(-38.0, 10.0), opened=(-34.0, 2.0), D=100.0, delta_t=0.0001, records=50000, takes_prev_vals=True, seed=12345, pol_ord = 1, **force_params):
+    def __init__(self, a=1000.0, closed=(-38.0, 10.0), opened=(-34.0, 2.0), D=100.0, delta_t=0.0001, records=50000, takes_prev_vals=True, seed=12345, pol_ord = 1, pona=0.05, **force_params):
         """Constructor of ``IonChannel`` class
 
         Parameters
@@ -117,10 +117,14 @@ class IonChannel:
         self.__generator1 = np.random.Generator(np.random.PCG64(seed=seed))
         # generator for random force
         self.__generator2 = np.random.Generator(np.random.PCG64(seed=seed))
+        # generator for random force on off
+        self.__generator3 = np.random.Generator(np.random.PCG64(seed=seed))
         self._pol_ord = pol_ord
         self.data = []
         self.breakpoints = []
-        self.__m = (closed[0]+opened[0]) / 2
+        
+        self.__probability_of_noise_occurring = pona
+
 
     def __random_force_gauss(self, records):
         """Function generates random force values using standard gaussian distribution.
@@ -320,24 +324,27 @@ class IonChannel:
             self.__random_force = self.__random_force_levy
             name += f'{random_force}_a{self.__a}_D{self.__D}_o{self.__opened[0]}_c{self.__closed[0]}_delta_t{self.__delta_t}_{list(self.__force_params.values()) if isinstance(self.__force_params, dict) else '_'}'
 
+        
         t = 0
         self.dwell_times = []
         # generating first state of ion channel (opened/closed)
         b = self.__generator1.choice([self.__closed, self.__opened])
-        tau = self.__generator1.exponential(b[1])
+        rounding = np.int8(np.abs(np.log10(self.__delta_t)))
+        tau = round(self.__generator1.exponential(b[1]), rounding)
         self.dwell_times.append(tau)
         self._opened_larger = self.__opened[0] > self.__closed[0]
         self.__opened_state = b[0] == self.__opened[0]
-        random_force_values = self.__random_force(np.int32(tau//self.__delta_t) + 1)
+        # random_force_values = self.__random_force(np.int32(tau//self.__delta_t) + 1)
         x = np.array([b[0]], dtype=np.float32)
         times = np.linspace(0, self.__records*self.__delta_t, self.__records, endpoint=False)
+        times_noise_works = self.__generator3.binomial(1, self.__probability_of_noise_occurring, np.int32(tau//self.__delta_t) + 1)
         self.data.append([times[0], x[0], b[0]])
         t += 1
         while True:
             new_x = (
                 self.__takes_prev_vals * x[t - 1] +
                 self.__model_force(x[t - 1], b[0]) * self.__delta_t +
-                random_force_values[t - 1]
+                (self.__random_force(1)[0] if times_noise_works[t] else 0)
                 )
             x = np.append(x, new_x)
             self.data.append([times[t], x[t], b[0]])
@@ -354,9 +361,10 @@ class IonChannel:
                     b=self.__closed
                 else:
                     b=self.__opened
-                tau = self.__generator1.exponential(b[1])
+                tau = round(self.__generator1.exponential(b[1]), rounding)
                 self.dwell_times.append(tau)
-                random_force_values = np.append(random_force_values, self.__random_force(np.int32(tau//self.__delta_t) + 1))
+                times_noise_works = np.append(times_noise_works, self.__generator3.binomial(1, self.__probability_of_noise_occurring, np.int32(tau//self.__delta_t)))
+                # random_force_values = np.append(random_force_values, self.__random_force(np.int32(tau//self.__delta_t) + 1))
 
         self.data = np.array(self.data)
         self.breakpoints = np.array(self.breakpoints)        
@@ -367,21 +375,15 @@ class IonChannel:
             with open(f'{save_file}.pickle', 'wb') as handle:
                 pickle.dump(data_dictionary, handle, protocol=pickle.DEFAULT_PROTOCOL)        
 
+
     def __calculate_ranges(self):
         """Calculates ranges of data. Used to better visualize data.
         """
-        LUT_threshold = {10.0: 1.0, 50.0: 2.0, 100.0 : 3.0, 200.0 : 4.0, 500.0 : 7.0, 1000 : 9.0}
-        minimum = np.min(self.data_transposed[1])
-        maximum = np.max(self.data_transposed[1])
-        
-        if self._opened_larger:
-            self.__bottom = self.__closed[0] - LUT_threshold[self.__D] if self.__closed[0] - LUT_threshold[self.__D] > minimum else minimum
-            self.__top = self.__opened[0] + LUT_threshold[self.__D] if self.__opened[0] + LUT_threshold[self.__D] < maximum else maximum
-            
-        else:
-            self.__bottom = self.__opened[0] - LUT_threshold[self.__D] if self.__opened[0] - LUT_threshold[self.__D] > minimum else minimum
-            self.__top = self.__closed[0] + LUT_threshold[self.__D] if self.__closed[0] + LUT_threshold[self.__D] < maximum else maximum
-            
+        hist = np.histogram(self.data_transposed[1], bins=100)
+        mask = np.append(hist[0]>10, False)
+        bins_in_range = hist[1][mask]
+        self.__bottom = np.round(bins_in_range[0]) - 0.5
+        self.__top = np.round(bins_in_range[-1]) + 0.5
 
     def plot_time_series(self, ax : plt.Axes, title='Generated model', plot_breakpoints=False, plot_zoomed=False):
         """Plots generated time series.
@@ -411,6 +413,7 @@ class IonChannel:
         ax.set_title(title)
         ax.plot(self.data_transposed[0], self.data_transposed[1])
         self.__calculate_ranges()
+        # first we need a histogram
         ax.set_ylim(bottom=self.__bottom, top=self.__top)
         if plot_breakpoints:
             ax.vlines(x=self.breakpoints, ymin=np.min(self.data_transposed[1]), ymax=np.max(self.data_transposed[1]), color='red', linestyle='--', alpha=0.6)
@@ -424,7 +427,7 @@ class IonChannel:
             sub_fig.tight_layout()
             sub_ax.set_xlabel("Time [s]")
             sub_ax.set_ylabel("Current [pA]")
-            sub_ax.plot(self.data_transposed[0][900:1000], self.data_transposed[1][900:1000], 'go-')
+            sub_ax.plot(self.data_transposed[0][900:1000], self.data_transposed[1][0:100], 'go-')
         else:
             sub_fig = None
         
@@ -442,14 +445,23 @@ class IonChannel:
             Number of bins, by default 100.
         """
         N, bins, patches = ax.hist(self.data_transposed[1], bins=bins, range=(self.__bottom, self.__top))
-        fracs = N / N.max()
-        norm = colors.Normalize(fracs.min(), fracs.max())
-        for thisfrac, thispatch in zip(fracs, patches):
-            color = plt.cm.cividis(norm(thisfrac))
-            thispatch.set_facecolor(color)
+        # fracs = N / N.max()
+        # norm = colors.Normalize(fracs.min(), fracs.max())
+        # for thisfrac, thispatch in zip(fracs, patches):
+        #     color = plt.cm.cividis(norm(thisfrac))
+        #     thispatch.set_facecolor(color)
         ax.set_title('Histogram of time series')
         
-        
+    def plot_dwell_times_histogram(self, bins=30):
+        sub_fig, (ax1, ax2) = plt.subplots(1, 2, constrained_layout=True)
+        sub_fig.set_size_inches(12, 6)
+        sub_fig.suptitle('Histogram of dwell times')
+        ax1.title.set_text('Closed State')
+        ax2.title.set_text('Opened State')
+        ax1.hist(self.dwell_times[0::2], bins=bins)
+        ax2.hist(self.dwell_times[1::2], bins=bins)
+        return sub_fig, (ax1, ax2)
+
 
     def calculate_hurst_exponent(self, data):
         """Calculates Hurst Exponent using Rescaled Range Analysis
@@ -691,6 +703,7 @@ class InteractiveIonChannel():
         self.__draw_vlines_at_breakpoint = Checkbox(value=False, description='Draw breakpoints')
         self.__seed_select = IntSlider(min=0, max=99999, value=12345, step=1, description='Seed')
         self.__pol_ord_select = IntSlider(min=1, max=3, value=1, step=1, description='Polynomial degree')
+        self.__prob_of_noise = FloatSlider(min=0.00, max=1.0, step=0.01, value=0.05, description='Probability of noise')
         self.__force_params_box = VBox()
         
 
@@ -710,6 +723,7 @@ class InteractiveIonChannel():
             takes_prev_vals=self.__takes_previous.value,
             seed=int(self.generator.random()*100000),
             pol_ord=self.__pol_ord_select.value,
+            pona=self.__prob_of_noise.value,
             **self.__force_params
         )
         self.ion_channel._generate_data(self.__force_dropdown.value, self.__random_force_dropdown.value)
@@ -750,6 +764,7 @@ class InteractiveIonChannel():
             self.__opened_0_slider,
             self.__opened_1_slider,
             self.__D_slider,
+            self.__prob_of_noise,
             self.__delta_t_slider,
             self.__records_slider,
             self.__takes_previous,
@@ -814,6 +829,13 @@ class InteractiveIonChannel():
 
         self.ion_channel.save_figure(fig, title=name)
         self.ion_channel.save_figure(sub_fig, title=name, name='zoomed_time_series', with_subfigures=False)
+        dt_fig, dt_axs = self.ion_channel.plot_dwell_times_histogram()
+        self.ion_channel.save_figure(dt_fig, title=name, name='dwell_times_exponent', with_subfigures=False)
+        with open('outputs2/dwell_times.txt', 'w') as f:
+            for item in self.ion_channel.dwell_times:
+                f.write(f'{item}\n')
+        f.close()
+
 
     def __multi_on_click_event(self, index):
         data = self.ion_channel.data_transposed[1]
