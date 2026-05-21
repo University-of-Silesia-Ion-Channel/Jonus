@@ -23,17 +23,17 @@ class InteractiveIonChannel():
     def __init__(self):
         """Constructor of InteractiveIonChannel class
         """
-        self.__a_slider = FloatSlider(min=0.0, max=5000.0, step=1, value=1000.0, description='a')
-        self.__closed_0_slider = IntSlider(min=-50, max=50, step=1, value=-38, description='Closed value')
-        self.__closed_1_slider = FloatSlider(min=0.0, max=1000.0, step=0.1, value=10.0, description='Closed avg time(scaled by delta_t)')
-        self.__opened_0_slider = IntSlider(min=-50, max=50, step=1, value=-34, description='Opened value')
-        self.__opened_1_slider = FloatSlider(min=0.0, max=1000.0, step=0.1, value=2.0, description='Opened avg time(scaled by delta_t)')
-        self.__D_slider = FloatSlider(min=0.00, max=5000.00, step=0.01, value=100.0, description='D')
         self.__delta_t_slider = SelectionSlider(
             options=[10**-i for i in range(3, 6)],
             value=0.0001,
             description='Delta t',
         )
+        self.__a_slider = FloatSlider(min=1.0, max=10000.0, step=1.0, value=750.0, description='a')
+        self.__closed_0_slider = IntSlider(min=-50, max=50, step=1, value=-38, description='Closed value')
+        self.__closed_1_slider = IntSlider(min=1, max=10000, step=1, value=200, description='Closed avg time')
+        self.__opened_0_slider = IntSlider(min=-50, max=50, step=1, value=-34, description='Opened value')
+        self.__opened_1_slider = IntSlider(min=1, max=10000, step=1, value=50, description='Opened avg time')
+        self.__D_slider = FloatSlider(min=0.00, max=100.00, step=0.01, value=1.0, description='D')
         self.__records_slider = IntSlider(min=1000, max=100000, step=1000, value=50000, description='Records')
 
         self.__random_force_dropdown = Dropdown(
@@ -50,16 +50,17 @@ class InteractiveIonChannel():
 
         self.__force_dropdown = Dropdown(
             options = ['Square', 'Asymetrical', 'Piecewise', 'Piecewise_simple'],
-            value = 'Piecewise_simple',
+            value = 'Square',
             description = 'Model force'
         )
 
         self.__fft_lags = IntSlider(min=30, max=200, step=10, value=100, description='FFT lags')
         self.__takes_previous = Checkbox(value=True, description='Takes previous values')
-        self.__draw_vlines_at_breakpoint = Checkbox(value=False, description='Draw breakpoints')
+        self.__draw_vlines_at_breakpoint = Checkbox(value=True, description='Draw breakpoints')
         self.__seed_select = IntSlider(min=0, max=99999, value=12345, step=1, description='Seed')
         self.__pol_ord_select = IntSlider(min=1, max=3, value=1, step=1, description='Polynomial degree')
-        self.__prob_of_noise = FloatSlider(min=0.00, max=1.0, step=0.01, value=0.05, description='Probability of noise')
+        self.__prob_of_noise = FloatSlider(min=0.00, max=1.0, step=0.01, value=1.0, description='Probability of noise')
+        self.__checkbox_with_inertia = Checkbox(value=True, description="Inertia")
         self.__force_params_box = VBox()
         
 
@@ -70,10 +71,10 @@ class InteractiveIonChannel():
         closed = (self.__closed_0_slider.value, self.__closed_1_slider.value)
         opened = (self.__opened_0_slider.value, self.__opened_1_slider.value)
         self.ion_channel = IonChannel(
-            a=self.__a_slider.value,
+            a=self.__a_slider.value/self.__delta_t_slider.value,
             closed=closed,
             opened=opened,
-            D=self.__D_slider.value,
+            D=self.__D_slider.value*(10**6),
             delta_t=self.__delta_t_slider.value,
             records=self.__records_slider.value,
             takes_prev_vals=self.__takes_previous.value,
@@ -82,7 +83,7 @@ class InteractiveIonChannel():
             pona=self.__prob_of_noise.value,
             **self.__force_params
         )
-        self.ion_channel._generate_data(self.__force_dropdown.value, self.__random_force_dropdown.value)
+        self.ion_channel._generate_data(self.__force_dropdown.value, self.__random_force_dropdown.value, self.__checkbox_with_inertia.value)
     
     def __update_force_params(self, *args):
         """
@@ -99,10 +100,18 @@ class InteractiveIonChannel():
         else: 
             force_params = []
 
+        if self.__checkbox_with_inertia.value:
+            gamma = FloatSlider(min=0, max=5000.0, step=1, value=4000.0, description='gamma')
+            force_params.append(gamma)
+        else:
+            force_params = []
+
         if force_type.lower() == str.lower('asymetrical') or force_type.lower() == str.lower('piecewise'):
             k = FloatSlider(min=0, max=10, step=0.01, value=1.0, description='k')
             force_params.append(k)
+            
         self.__force_params_box.children = force_params
+
 
     def interact(self):
         """Main function to call on ``InteractiveIonChannel`` class. 
@@ -111,6 +120,11 @@ class InteractiveIonChannel():
         """
         self.__force_dropdown.observe(self.__update_force_params, names='value')
         self.__random_force_dropdown.observe(self.__update_force_params, names='value')
+        self.__checkbox_with_inertia.observe(self.__update_force_params, names='value')
+
+        if self.__checkbox_with_inertia:
+            gamma = FloatSlider(min=0, max=5000.0, step=1, value=4000.0, description='gamma')
+            self.__force_params_box.children = [gamma]
 
         display(
             self.__seed_select,
@@ -123,6 +137,7 @@ class InteractiveIonChannel():
             self.__prob_of_noise,
             self.__delta_t_slider,
             self.__records_slider,
+            self.__checkbox_with_inertia,
             self.__takes_previous,
             self.__autocorrelation_dropdown,
             self.__fft_lags,
