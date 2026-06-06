@@ -28,12 +28,12 @@ class InteractiveIonChannel():
             value=0.0001,
             description='Delta t',
         )
-        self.__a_slider = FloatSlider(min=1.0, max=10000.0, step=1.0, value=750.0, description='a')
-        self.__closed_0_slider = IntSlider(min=-50, max=50, step=1, value=-38, description='Closed value')
+        self.__a_slider = FloatSlider(min=0, max=1, step=0.001, value=0.01, description='a')
+        self.__closed_0_slider = IntSlider(min=-50, max=50, step=1, value=1, description='Closed value')
         self.__closed_1_slider = IntSlider(min=1, max=10000, step=1, value=200, description='Closed avg time')
-        self.__opened_0_slider = IntSlider(min=-50, max=50, step=1, value=-34, description='Opened value')
+        self.__opened_0_slider = IntSlider(min=-50, max=50, step=1, value=-1, description='Opened value')
         self.__opened_1_slider = IntSlider(min=1, max=10000, step=1, value=50, description='Opened avg time')
-        self.__D_slider = FloatSlider(min=0.00, max=100.00, step=0.01, value=1.0, description='D')
+        self.__D_slider = FloatSlider(min=0.00, max=100.00, step=0.01, value=0.1, description='D')
         self.__records_slider = IntSlider(min=1000, max=100000, step=1000, value=50000, description='Records')
 
         self.__random_force_dropdown = Dropdown(
@@ -71,10 +71,10 @@ class InteractiveIonChannel():
         closed = (self.__closed_0_slider.value, self.__closed_1_slider.value)
         opened = (self.__opened_0_slider.value, self.__opened_1_slider.value)
         self.ion_channel = IonChannel(
-            a=self.__a_slider.value/self.__delta_t_slider.value,
+            a=self.__a_slider.value,
             closed=closed,
             opened=opened,
-            D=self.__D_slider.value*(10**6),
+            D=self.__D_slider.value,
             delta_t=self.__delta_t_slider.value,
             records=self.__records_slider.value,
             takes_prev_vals=self.__takes_previous.value,
@@ -101,7 +101,7 @@ class InteractiveIonChannel():
             force_params = []
 
         if self.__checkbox_with_inertia.value:
-            gamma = FloatSlider(min=0, max=5000.0, step=1, value=4000.0, description='gamma')
+            gamma = FloatSlider(min=0, max=10, step=0.1, value=1, description='gamma')
             force_params.append(gamma)
         else:
             force_params = []
@@ -123,7 +123,7 @@ class InteractiveIonChannel():
         self.__checkbox_with_inertia.observe(self.__update_force_params, names='value')
 
         if self.__checkbox_with_inertia:
-            gamma = FloatSlider(min=0, max=5000.0, step=1, value=4000.0, description='gamma')
+            gamma = FloatSlider(min=0, max=10, step=0.1, value=1, description='gamma')
             self.__force_params_box.children = [gamma]
 
         display(

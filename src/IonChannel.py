@@ -5,7 +5,7 @@ import os
 import matplotlib.pyplot as plt
 import matplotlib.transforms as mtransforms
 
-from scipy.stats import levy_stable, powerlaw
+from scipy.stats import levy_stable
 from statsmodels.graphics.tsaplots import plot_acf
 from statsmodels.tsa.stattools import adfuller
 import fathon
@@ -120,7 +120,7 @@ class IonChannel:
         """
         if records == 0:
             records = 2
-        return self.__D ** 0.5 * (2 * self.__delta_t) ** 0.5 * self.__generator2.normal(0, 1, size=records)
+        return (2 * self.__D) ** 0.5 * (self.__delta_t) ** 0.5 * self.__generator2.normal(0, 1, size=records)
     
     def __random_force_levy(self, records):
         """Function generates random force values using ``levy_stable`` distribution.
@@ -262,6 +262,14 @@ class IonChannel:
         #         if x <= b:
         #             return self.__model_force_square(x, b)                    
     
+    def __calculate_velocity(self, velocity, x, b, gamma, random_force_value, sqrt_gamma):
+        return (
+                    velocity + 
+                    (self.__model_force(x, b) - gamma * velocity) * self.__delta_t + 
+                    # (self.__random_force(1)[0] if times_noise_works[t] else 0) * sqrt_gamma
+                    random_force_value #* sqrt_gamma
+                )
+
     def _generate_data(self, model_force="Piecewise_simple", random_force='Gauss', with_inertia=False, save_to_pickle=True):
         """Function, that generates time series of ion channel model and saves it to `pickle` file if `save_to_pickle` True.
 
@@ -312,38 +320,37 @@ class IonChannel:
         b = self.__generator1.choice([self.__closed, self.__opened])
         self.__first = b
         rounding = np.int8(np.abs(np.log10(self.__delta_t)))
+        state_change = False
         tau = self.__delta_t
-        # if b[0] == self.__opened[0]:
         tau = round(self.__generator1.exponential(b[1]), rounding)
-        # else:
-            # tau = np.round(powerlaw.rvs(b[1], loc=self.__delta_t, scale=0.2, random_state = self.__generator3), decimals=rounding)
-
 
         self.dwell_times.append(tau)
         self._opened_larger = self.__opened[0] > self.__closed[0]
         self.__opened_state = b[0] == self.__opened[0]
-        random_force_values = self.__random_force(np.int32(tau//self.__delta_t) + 1)
+        random_force_values = self.__random_force(np.int32(tau//self.__delta_t) + 2)
+        print(len(random_force_values), np.int32(tau//self.__delta_t))
         x = np.array([b[0]], dtype=np.float32)
         times = np.linspace(0, self.__records*self.__delta_t, self.__records, endpoint=False)
         # times_noise_works = self.__generator3.binomial(1, self.__probability_of_noise_occurring, np.int32(tau//self.__delta_t) + 1)
         self.data.append([times[0], x[0], b[0]])
         t += 1
-        velocities = []
+        self.velocities = []
         if with_inertia:
-            velocities = [0]
+            self.velocities = [0]
             gamma = self.__force_params['gamma']
             sqrt_gamma = np.sqrt(gamma)
             while True:
-                new_v = (
-                    velocities[t - 1] + 
-                    (self.__model_force(x[t - 1], b[0]) - gamma * velocities[t - 1]) * self.__delta_t + 
-                    # (self.__random_force(1)[0] if times_noise_works[t] else 0) * sqrt_gamma
-                    random_force_values[t] * sqrt_gamma
-                )
-                new_x = x[t - 1] + new_v * self.__delta_t
+                if state_change:
+                    new_x = b[0] # +- random value
+                    new_v = self.__calculate_velocity(self.velocities[t-1], b[0], b[0], gamma, random_force_values[t], sqrt_gamma)
+                    state_change = False
+                    # print(f"State changed after {t} steps")
+                else:
+                    new_v = self.__calculate_velocity(self.velocities[t-1], x[t-1], b[0], gamma, random_force_values[t], sqrt_gamma)
+                    new_x = x[t - 1] + new_v * self.__delta_t
 
                 x = np.append(x, new_x)
-                velocities.append(new_v)
+                self.velocities.append(new_v)
                 self.data.append([times[t], x[t], b[0]])
                 t += 1
                 tau -= self.__delta_t
@@ -351,18 +358,20 @@ class IonChannel:
                 if t >= self.__records:
                     break
 
+                # switch of state
                 if(tau - self.__delta_t < self.__delta_t):
+                    # TODO: This needs to be changed to be longer so the point is somewhere in the middle
                     self.breakpoints.append(times[t])
                     self.__opened_state = b[0] == self.__opened[0]
                     if self.__opened_state:
                         b=self.__closed
-                        # tau = np.round(powerlaw.rvs(b[1], loc=self.__delta_t, scale=0.2, random_state = self.__generator3), decimals=rounding)
                     else:
                         b=self.__opened
                     tau = round(self.__generator1.exponential(b[1]), rounding)
                     self.dwell_times.append(tau)
                     # times_noise_works = np.append(times_noise_works, self.__generator3.binomial(1, self.__probability_of_noise_occurring, np.int32(tau//self.__delta_t)))
                     random_force_values = np.append(random_force_values, self.__random_force(np.int32(tau//self.__delta_t) + 1))
+                    state_change = True
         else:
             while True:
                 new_x = (
@@ -394,7 +403,7 @@ class IonChannel:
         self.data = np.array(self.data)
         self.breakpoints = np.array(self.breakpoints)
         self.dwell_times = np.array(self.dwell_times)
-        velocities = np.array(velocities)
+        self.velocities = np.array(self.velocities)
         self.data_transposed = self.data.T
         if save_to_pickle:            
             data_dictionary = {'times': self.data_transposed[0], 'x' : self.data_transposed[1], 'break_points': self.breakpoints, 'dwell_times': self.dwell_times, 'velocities': velocities}
